@@ -123,10 +123,11 @@ class _CCCLValue(ctypes.Structure):
 @functools.lru_cache(maxsize=None)
 def _numba_type_to_info(numba_type):
     context = cuda.descriptor.cuda_target.target_context
-    size = context.get_value_type(numba_type).get_abi_size(context.target_data)
-    alignment = context.get_value_type(numba_type).get_abi_alignment(
-        context.target_data
-    )
+    value_type = context.get_value_type(numba_type)
+    if hasattr(value_type, "pointee"):
+        value_type = value_type.pointee
+    size = value_type.get_abi_size(context.target_data)
+    alignment = value_type.get_abi_alignment(context.target_data)
     return _TypeInfo(size, alignment, _type_to_enum(numba_type))
 
 
@@ -139,14 +140,19 @@ def _numpy_type_to_info(numpy_type):
 def _host_array_to_value(array):
     dtype = array.dtype
     info = _numpy_type_to_info(dtype)
-    return _CCCLValue(info, array.ctypes.data)
+    if isinstance(array, np.void):
+        data = np.ctypeslib.as_ctypes_type(array.dtype)(*[array[name] for name in array.dtype.names])
+        out = _CCCLValue(info, ctypes.addressof(data))
+        return out
+    else:
+        return _CCCLValue(info, array.ctypes.data)
 
 
 class _Op:
     def __init__(self, dtype, op):
         value_type = numba.from_dtype(dtype)
         self.ltoir, _ = cuda.compile(
-            op, sig=value_type(value_type, value_type), output="ltoir"
+            op, sig=(value_type, value_type), output="ltoir"
         )
         self.name = op.__name__.encode("utf-8")
 
@@ -161,6 +167,16 @@ class _Op:
             None,
         )
 
+    @classmethod
+    def from_numba(cls, op):
+        instance = cls.__new__(cls)
+        value_type = op._numba_type
+        instance.ltoir, _ = cuda.compile(
+            op, sig=(value_type, value_type), output="ltoir"
+        )
+        instance.name = op.__name__.encode("utf-8")
+        return instance
+
 
 def _device_array_to_cccl_iter(array):
     dtype = array.dtype
@@ -168,8 +184,8 @@ def _device_array_to_cccl_iter(array):
     # Note: this is slightly slower, but supports all ndarray-like objects as long as they support CAI
     # TODO: switch to use gpumemoryview once it's ready
     return _CCCLIterator(
-        1,
-        1,
+        info.size,
+        info.alignment,
         _CCCLIteratorKindEnum.POINTER,
         _CCCLOp(),
         _CCCLOp(),
@@ -318,7 +334,11 @@ class _Reduce:
         cub_path, thrust_path, libcudacxx_path, cuda_include_path = _get_paths()
         bindings = _get_bindings()
         accum_t = h_init.dtype
-        self.op_wrapper = _Op(accum_t, op)
+        if hasattr(op, "_numba_type"):
+            self.op_wrapper = _Op.from_numba(op)
+        else:
+            self.op_wrapper = _Op(accum_t, op)
+
         d_out_cccl = _to_cccl_iter(d_out)
         self.build_result = _CCCLDeviceReduceBuildResult()
 
