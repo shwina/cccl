@@ -37,7 +37,7 @@ def test_device_reduce(dtype):
         return a + b
 
     init_value = 42
-    h_init = numpy.array([init_value], dtype=dtype)
+    h_init = dtype(init_value)
     d_output = numba.cuda.device_array(1, dtype=dtype)
     reduce_into = cudax.reduce_into(d_output, d_output, op, h_init)
 
@@ -56,7 +56,7 @@ def test_complex_device_reduce():
     def op(a, b):
         return a + b
 
-    h_init = numpy.array([40.0 + 2.0j], dtype=complex)
+    h_init = numpy.complex128(40.0 + 2.0j)
     d_output = numba.cuda.device_array(1, dtype=complex)
     reduce_into = cudax.reduce_into(d_output, d_output, op, h_init)
 
@@ -68,7 +68,7 @@ def test_complex_device_reduce():
         reduce_into(d_temp_storage, d_input, d_output, None, h_init)
 
         result = d_output.copy_to_host()[0]
-        expected = numpy.sum(h_input, initial=h_init[0])
+        expected = numpy.sum(h_input, initial=h_init)
         assert result == pytest.approx(expected)
 
 
@@ -77,7 +77,7 @@ def test_device_reduce_dtype_mismatch():
         return a if a < b else b
 
     dtypes = [numpy.int32, numpy.int64]
-    h_inits = [numpy.array([], dt) for dt in dtypes]
+    h_inits = [dt() for dt in dtypes]
     h_inputs = [numpy.array([], dt) for dt in dtypes]
     d_outputs = [numba.cuda.device_array(1, dt) for dt in dtypes]
     d_inputs = [numba.cuda.to_device(h_inp) for h_inp in h_inputs]
@@ -115,7 +115,7 @@ def _test_device_sum_with_iterator(
 
     d_output = numba.cuda.device_array(1, dtype_out)  # to store device sum
 
-    h_init = numpy.array([start_sum_with], dtype_out)
+    h_init = dtype_out.type(start_sum_with)
 
     reduce_into = cudax.reduce_into(
         d_in=d_input, d_out=d_output, op=add_op, h_init=h_init

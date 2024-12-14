@@ -7,11 +7,13 @@ import importlib
 import ctypes
 import shutil
 import numba
+import numpy as np
 import os
 
 from numba import cuda, types
 from numba.cuda.cudadrv import enums
-
+from numba.core.datamodel import StructModel
+from numba.core.typing.ctypes_utils import to_ctypes
 from ._iterators import IteratorBase
 
 
@@ -122,10 +124,13 @@ class _CCCLValue(ctypes.Structure):
 @functools.lru_cache(maxsize=None)
 def _numba_type_to_info(numba_type):
     context = cuda.descriptor.cuda_target.target_context
-    size = context.get_value_type(numba_type).get_abi_size(context.target_data)
-    alignment = context.get_value_type(numba_type).get_abi_alignment(
-        context.target_data
-    )
+    value_type = context.get_value_type(numba_type)
+    if isinstance(numba_type, types.Record):
+        # then `value_type` is a pointer and we need the
+        # alignment of the pointee.
+        value_type = value_type.pointee
+    size = value_type.get_abi_size(context.target_data)
+    alignment = value_type.get_abi_alignment(context.target_data)
     return _TypeInfo(size, alignment, _type_to_enum(numba_type))
 
 
@@ -135,18 +140,33 @@ def _numpy_type_to_info(numpy_type):
     return _numba_type_to_info(numba_type)
 
 
-def _host_array_to_value(array):
-    dtype = array.dtype
-    info = _numpy_type_to_info(dtype)
-    return _CCCLValue(info, array.ctypes.data)
+def _host_scalar_to_value(scalar):
+    numba_type = numba.typeof(scalar)
+    info = _numba_type_to_info(numba_type)
+
+    context = cuda.descriptor.cuda_target.target_context
+    dmm = context.data_model_manager
+    model = dmm.lookup(numba_type)
+    if isinstance(model, StructModel):
+        # create a corresponding numpy struct type:
+        struct_type = np.dtype(
+            list(
+                zip(
+                    model._fields, map(lambda x: np.dtype(to_ctypes(x)), model._members)
+                )
+            )
+        )
+        ctypes_type = np.ctypeslib.as_ctypes_type(struct_type)
+        ctypes_data = ctypes_type(*[getattr(scalar, name) for name in model._fields])
+    else:
+        ctypes_data = to_ctypes(numba_type)(scalar)
+    # TODO: someone needs to keep ctypes_data alive:
+    return _CCCLValue(info, ctypes.addressof(ctypes_data))
 
 
 class _Op:
-    def __init__(self, dtype, op):
-        value_type = numba.from_dtype(dtype)
-        self.ltoir, _ = cuda.compile(
-            op, sig=value_type(value_type, value_type), output="ltoir"
-        )
+    def __init__(self, op, numba_type):
+        self.ltoir, _ = cuda.compile(op, sig=(numba_type, numba_type), output="ltoir")
         self.name = op.__name__.encode("utf-8")
 
     def handle(self):
@@ -167,8 +187,8 @@ def _device_array_to_cccl_iter(array):
     # Note: this is slightly slower, but supports all ndarray-like objects as long as they support CAI
     # TODO: switch to use gpumemoryview once it's ready
     return _CCCLIterator(
-        1,
-        1,
+        info.size,
+        info.alignment,
         _CCCLIteratorKindEnum.POINTER,
         _CCCLOp(),
         _CCCLOp(),
@@ -312,12 +332,11 @@ class _Reduce:
             d_in_cccl.value_type.type.value
         )
         self._ctor_d_out_dtype = d_out.dtype
-        self._ctor_init_dtype = h_init.dtype
+        self._ctor_init_dtype = numba.typeof(h_init)
         cc_major, cc_minor = cuda.get_current_device().compute_capability
         cub_path, thrust_path, libcudacxx_path, cuda_include_path = _get_paths()
         bindings = _get_bindings()
-        accum_t = h_init.dtype
-        self.op_wrapper = _Op(accum_t, op)
+        self.op_wrapper = _Op(op, numba.typeof(h_init))
         d_out_cccl = _to_cccl_iter(d_out)
         self.build_result = _CCCLDeviceReduceBuildResult()
 
@@ -327,7 +346,7 @@ class _Reduce:
             d_in_cccl,
             d_out_cccl,
             self.op_wrapper.handle(),
-            _host_array_to_value(h_init),
+            _host_scalar_to_value(h_init),
             cc_major,
             cc_minor,
             ctypes.c_char_p(cub_path),
@@ -353,7 +372,7 @@ class _Reduce:
             _cccl_type_enum_as_name(d_in_cccl.value_type.type.value),
         )
         _dtype_validation(self._ctor_d_out_dtype, d_out.dtype)
-        _dtype_validation(self._ctor_init_dtype, h_init.dtype)
+        _dtype_validation(self._ctor_init_dtype, numba.typeof(h_init))
         bindings = _get_bindings()
         if temp_storage is None:
             temp_storage_bytes = ctypes.c_size_t()
@@ -372,7 +391,7 @@ class _Reduce:
             d_out_cccl,
             ctypes.c_ulonglong(num_items),
             self.op_wrapper.handle(),
-            _host_array_to_value(h_init),
+            _host_scalar_to_value(h_init),
             None,
         )
         if error != enums.CUDA_SUCCESS:
