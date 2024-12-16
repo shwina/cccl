@@ -8,6 +8,11 @@ import functools
 import ctypes
 import numpy as np
 from numba import types, cuda
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from numba.types import Type as NumbaType
+    import numpy as np
 
 from .iterators._iterators import IteratorBase
 
