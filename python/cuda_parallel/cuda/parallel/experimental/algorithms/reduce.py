@@ -13,9 +13,6 @@ from typing import Callable
 from .. import _cccl as cccl
 from .._bindings import get_paths, get_bindings
 
-if TYPE_CHECKING:
-    import numpy as np
-
 
 class _Op:
     def __init__(self, dtype: np.dtype, op: Callable):
