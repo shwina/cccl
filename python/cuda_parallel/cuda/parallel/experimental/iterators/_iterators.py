@@ -6,6 +6,7 @@ from typing import Dict, Callable
 from llvmlite import ir
 from numba.core.extending import intrinsic, overload
 from numba.core.typing.ctypes_utils import to_ctypes
+from numba.cuda.dispatcher import CUDADispatcher
 from numba import cuda, types
 import numba
 import numpy as np
@@ -90,6 +91,9 @@ class IteratorBase:
     @staticmethod
     def dereference(state):
         raise NotImplementedError("Subclasses must override dereference staticmethod")
+
+    def __hash__(self):
+        return hash((self.numba_type, self.value_type, self.abi_name))
 
 
 def sizeof_pointee(context, ptr):
@@ -256,8 +260,9 @@ def make_transform_iterator(it, op: Callable):
     op = cuda.jit(op, device=True)
 
     class TransformIterator(IteratorBase):
-        def __init__(self, it: IteratorBase, op):
+        def __init__(self, it: IteratorBase, op: CUDADispatcher):
             self._it = it
+            self._op = op
             numba_type = it.numba_type
             # TODO: the abi name below isn't unique enough when we have e.g.,
             # two identically named `op` functions with different
@@ -292,5 +297,14 @@ def make_transform_iterator(it, op: Callable):
         @property
         def state(self) -> ctypes.c_void_p:
             return it.state
+
+        def __hash__(self):
+            return hash(
+                (
+                    self._it,
+                    self._op.py_func.__code__.co_code,
+                    self._op.py_func.__closure__,
+                )
+            )
 
     return TransformIterator(it, op)
