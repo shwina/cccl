@@ -20,7 +20,7 @@ _DEVICE_POINTER_BITWIDTH = _DEVICE_POINTER_SIZE * 8
 
 
 @lru_cache(maxsize=None)
-def _get_abi_suffix(kind: "IteratorKind"):
+def _get_abi_suffix(kind: "IteratorKind") -> str:
     # given an IteratorKind, return a UUID. The value
     # is cached so that the same UUID is always returned
     # for a given IteratorKind.
@@ -33,17 +33,17 @@ def cached_compile(func, sig, abi_name=None, **kwargs):
 
 
 class IteratorKind:
-    def __init__(self, value_type):
-        self.value_type = value_type
+    def __init__(self, descr: dict):
+        self.descr = descr
 
     def __repr__(self):
-        return f"{self.__class__.__name__}[{str(self.value_type)}]"
+        return f"{self.__class__.__name__}{list(self.descr.items())}"
 
     def __eq__(self, other):
-        return type(self) is type(other) and self.value_type == other.value_type
+        return type(self) is type(other) and self.descr == other.descr
 
     def __hash__(self):
-        return hash(self.value_type)
+        return hash(tuple(self.descr.items()))
 
 
 class IteratorBase:
@@ -87,7 +87,7 @@ class IteratorBase:
 
     @property
     def kind(self):
-        return self.__class__.iterator_kind_type(self.value_type)
+        return self.__class__.iterator_kind_type({"value_type": self.value_type})
 
     # TODO: should we cache this? Current docs environment doesn't allow
     # using Python > 3.7. We could use a hand-rolled cached_property if
@@ -299,11 +299,7 @@ class CountingIterator(IteratorBase):
 
 
 class TransformIteratorKind(IteratorKind):
-    def __eq__(self, other):
-        return type(self) is type(other) and self.value_type == other.value_type
-
-    def __hash__(self):
-        return hash(self.value_type)
+    pass
 
 
 def make_transform_iterator(it, op: Callable):
@@ -339,7 +335,9 @@ def make_transform_iterator(it, op: Callable):
 
         @property
         def kind(self):
-            return self.__class__.iterator_kind_type((self._it.kind, self._op))
+            return self.__class__.iterator_kind_type(
+                {"it": self._it.kind, "op": self._op}
+            )
 
         @staticmethod
         def advance(state, distance):
