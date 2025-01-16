@@ -254,7 +254,6 @@ struct DispatchScan
   {
     using ScanTileStateT = typename KernelSource::ScanTileStateT;
 
-    // TODO(ashwin): Don't know how to handle this.
     // `LOAD_LDG` makes in-place execution UB and doesn't lead to better
     // performance.
     static_assert(policy.LoadModifier() != CacheLoadModifier::LOAD_LDG,
