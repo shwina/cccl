@@ -61,6 +61,8 @@
 
 #include <cuda/std/type_traits>
 
+#include <iostream>
+
 CUB_NAMESPACE_BEGIN
 
 namespace detail::scan
@@ -95,6 +97,16 @@ struct DeviceScanKernelSource
   CUB_RUNTIME_FUNCTION static constexpr std::size_t AccumSize()
   {
     return sizeof(AccumT);
+  }
+
+  CUB_RUNTIME_FUNCTION ScanTileStateT TileState()
+  {
+    return ScanTileStateT();
+  }
+
+  CUB_RUNTIME_FUNCTION cudaError_t GetTileStateAllocationSize(int num_tiles, size_t& temp_storage_bytes)
+  {
+    return ScanTileStateT::AllocationSize(num_tiles, temp_storage_bytes);
   }
 };
 
@@ -158,9 +170,6 @@ struct DispatchScan
   //---------------------------------------------------------------------
 
   static constexpr int INIT_KERNEL_THREADS = 128;
-
-  // The input value type
-  using InputT = cub::detail::value_t<InputIteratorT>;
 
   /// Device-accessible allocation of temporary storage.  When nullptr, the
   /// required allocation size is written to \p temp_storage_bytes and no work
@@ -252,13 +261,12 @@ struct DispatchScan
   CUB_RUNTIME_FUNCTION _CCCL_HOST _CCCL_FORCEINLINE cudaError_t
   Invoke(InitKernelT init_kernel, ScanKernelT scan_kernel, ActivePolicyT policy = {})
   {
-    using ScanTileStateT = typename KernelSource::ScanTileStateT;
-
+    // TODO(ashwin): Does this now need to be a runtime check?
     // `LOAD_LDG` makes in-place execution UB and doesn't lead to better
     // performance.
-    static_assert(policy.LoadModifier() != CacheLoadModifier::LOAD_LDG,
-                  "The memory consistency model does not apply to texture "
-                  "accesses");
+    // static_assert(policy.LoadModifier() != CacheLoadModifier::LOAD_LDG,
+    //               "The memory consistency model does not apply to texture "
+    //               "accesses");
 
     cudaError error = cudaSuccess;
     do
@@ -277,7 +285,7 @@ struct DispatchScan
 
       // Specify temporary storage allocation requirements
       size_t allocation_sizes[1];
-      error = CubDebug(ScanTileStateT::AllocationSize(num_tiles, allocation_sizes[0]));
+      error = CubDebug(kernel_source.GetTileStateAllocationSize(num_tiles, allocation_sizes[0]));
       if (cudaSuccess != error)
       {
         break; // bytes needed for tile status descriptors
@@ -307,8 +315,8 @@ struct DispatchScan
       }
 
       // Construct the tile status interface
-      ScanTileStateT tile_state;
-      error = CubDebug(tile_state.Init(num_tiles, allocations[0], allocation_sizes[0]));
+      auto tile_state = kernel_source.TileState();
+      error           = CubDebug(tile_state.Init(num_tiles, allocations[0], allocation_sizes[0]));
       if (cudaSuccess != error)
       {
         break;
@@ -340,9 +348,10 @@ struct DispatchScan
 
       // Get SM occupancy for scan_kernel
       int scan_sm_occupancy;
-      error = CubDebug(MaxSmOccupancy(scan_sm_occupancy, // out
-                                      scan_kernel,
-                                      policy.Scan().BlockThreads()));
+      error = CubDebug(launcher_factory.MaxSmOccupancy(
+        scan_sm_occupancy, // out
+        scan_kernel,
+        policy.Scan().BlockThreads()));
       if (cudaSuccess != error)
       {
         break;
@@ -391,17 +400,15 @@ struct DispatchScan
         }
       }
     } while (0);
-
     return error;
   }
 
   template <typename ActivePolicyT>
   CUB_RUNTIME_FUNCTION _CCCL_HOST _CCCL_FORCEINLINE cudaError_t Invoke(ActivePolicyT active_policy = {})
   {
-    using ScanTileStateT = typename KernelSource::ScanTileStateT;
     auto wrapped_policy  = detail::scan::MakeScanPolicyWrapper(active_policy);
     // Ensure kernels are instantiated.
-    return Invoke(kernel_source.ScanInitKernel(), kernel_source.ScanKernel(), wrapped_policy);
+    return Invoke(kernel_source.InitKernel(), kernel_source.ScanKernel(), wrapped_policy);
   }
 
   /**
@@ -445,20 +452,20 @@ struct DispatchScan
     InitValueT init_value,
     OffsetT num_items,
     cudaStream_t stream,
-    KernelSource kernel_source = {},
-    MaxPolicyT max_policy      = {})
+    KernelSource kernel_source             = {},
+    KernelLauncherFactory launcher_factory = {},
+    MaxPolicyT max_policy                  = {})
   {
     cudaError_t error;
     do
     {
       // Get PTX version
       int ptx_version = 0;
-      error           = CubDebug(PtxVersion(ptx_version));
+      error           = CubDebug(launcher_factory.PtxVersion(ptx_version));
       if (cudaSuccess != error)
       {
         break;
       }
-
       // Create dispatch functor
       DispatchScan dispatch(
         d_temp_storage,
@@ -470,7 +477,8 @@ struct DispatchScan
         init_value,
         stream,
         ptx_version,
-        kernel_source);
+        kernel_source,
+        launcher_factory);
 
       // Dispatch to chained policy
       error = CubDebug(max_policy.Invoke(ptx_version, dispatch));

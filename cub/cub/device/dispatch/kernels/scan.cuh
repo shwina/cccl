@@ -29,6 +29,8 @@
 
 #include <cub/config.cuh>
 
+#include <cub/agent/single_pass_scan_operators.cuh>
+
 #if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
 #  pragma GCC system_header
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
@@ -39,6 +41,8 @@
 
 #include <cub/agent/agent_scan.cuh>
 #include <cub/util_macro.cuh>
+
+#include <cuda/std/type_traits>
 
 CUB_NAMESPACE_BEGIN
 
@@ -170,7 +174,7 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ScanPolicyT::BLOCK_THREADS))
     InitValueT init_value,
     OffsetT num_items)
 {
-  using RealInitValueT = typename InitValueT::value_type;
+  using RealInitValueT = InitValueT;
   using ScanPolicyT    = typename ChainedPolicyT::ActivePolicy::ScanPolicyT;
 
   // Thread block type for scanning input tiles
