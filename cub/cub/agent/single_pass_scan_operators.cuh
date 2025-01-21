@@ -575,10 +575,7 @@ struct ScanTileState<T, true>
   };
 
   // Constants
-  enum
-  {
-    TILE_STATUS_PADDING = CUB_PTX_WARP_THREADS,
-  };
+  static constexpr int TILE_STATUS_PADDING = CUB_PTX_WARP_THREADS;
 
   // Device storage
   TxnWord* d_tile_descriptors;

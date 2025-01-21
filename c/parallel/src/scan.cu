@@ -326,36 +326,13 @@ struct scan_tile_state
 
   cudaError_t Init(int, void* d_temp_storage, size_t)
   {
-    if (accum_type.size == 8)
-    {
-      d_tile_descriptor = reinterpret_cast<ulonglong2*>(d_temp_storage);
-    }
-    else if (accum_type.size == 4)
-    {
-      d_tile_descriptor = reinterpret_cast<uint2*>(d_temp_storage);
-    }
-    else
-    {
-      d_tile_descriptor = reinterpret_cast<unsigned int*>(d_temp_storage);
-    }
+    d_tile_descriptor = d_temp_storage;
     return cudaSuccess;
   }
 
-  template <int sz>
-  constexpr static cudaError_t AllocationSize(int num_tiles, size_t& d_temp_storage_bytes)
+  static cudaError_t AllocationSize(int num_tiles, size_t& d_temp_storage_bytes, int sz)
   {
-    if (sz == 8)
-    {
-      d_temp_storage_bytes = (num_tiles + TILE_STATUS_PADDING) * sizeof(ulonglong2);
-    }
-    else if (sz == 4)
-    {
-      d_temp_storage_bytes = (num_tiles + TILE_STATUS_PADDING) * sizeof(uint2);
-    }
-    else
-    {
-      d_temp_storage_bytes = (num_tiles + TILE_STATUS_PADDING) * sizeof(unsigned int);
-    }
+    d_temp_storage_bytes = (num_tiles + TILE_STATUS_PADDING) * sz;
     return cudaSuccess;
   }
 };
@@ -384,17 +361,24 @@ struct scan_kernel_source
 
   cudaError_t GetTileStateAllocationSize(int num_tiles, size_t& temp_storage_bytes)
   {
-    if (build.accumulator_type.size == 8)
+    auto sz = GetWordSize(build.accumulator_type.size);
+    return scan_tile_state::AllocationSize(num_tiles, temp_storage_bytes, sz);
+  }
+
+  int GetWordSize(int accumulator_size)
+  {
+    // compile to PTX and get the size of the accumulator type
+    if (accumulator_size == 8)
     {
-      return scan_tile_state::AllocationSize<8>(num_tiles, temp_storage_bytes);
+      return sizeof(ulonglong2);
     }
-    else if (build.accumulator_type.size == 4)
+    else if (accumulator_size == 4)
     {
-      return scan_tile_state::AllocationSize<4>(num_tiles, temp_storage_bytes);
+      return sizeof(uint2);
     }
     else
     {
-      return scan_tile_state::AllocationSize<2>(num_tiles, temp_storage_bytes);
+      return sizeof(unsigned int);
     }
   }
 };
