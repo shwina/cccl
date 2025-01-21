@@ -7,6 +7,7 @@
 
 #include <format>
 #include <iostream>
+#include <regex>
 #include <string>
 #include <type_traits>
 
@@ -18,6 +19,7 @@
 #include "util/indirect_arg.h"
 #include "util/types.h"
 #include <cccl/c/scan.h>
+#include <nvrtc.h>
 #include <nvrtc/command_list.h>
 
 // TODOS
@@ -361,24 +363,68 @@ struct scan_kernel_source
 
   cudaError_t GetTileStateAllocationSize(int num_tiles, size_t& temp_storage_bytes)
   {
-    auto sz = GetWordSize(build.accumulator_type.size);
+    int sz = GetWordSize();
     return scan_tile_state::AllocationSize(num_tiles, temp_storage_bytes, sz);
   }
 
-  int GetWordSize(int accumulator_size)
+  int GetWordSize()
   {
-    // compile to PTX and get the size of the accumulator type
-    if (accumulator_size == 8)
+    auto accum_type = cccl_type_enum_to_string(build.accumulator_type.type);
+
+    std::string_view kernel_code_template = R"(
+    #include <cub/agent/single_pass_scan_operators.cuh>
+
+    __device__ unsigned sizeof_word = sizeof(typename cub::ScanTileState<{}>::TxnWord);
+    )";
+    std::string full_code                 = std::vformat(kernel_code_template, std::make_format_args(accum_type));
+
+    // Compile the CUDA code into PTX using NVRTC
+    nvrtcProgram program;
+    nvrtcCreateProgram(&program, full_code.c_str(), "kernel.cu", 0, nullptr, nullptr);
+
+    // Set compiler flags
+    const char* flags[] = {
+      "--gpu-architecture=compute_75",
+      "--relocatable-device-code=true",
+      "-I/home/ashwin/workspace/cccl/cub",
+      "-I/home/ashwin/workspace/cccl/libcudacxx/include"};
+    nvrtcResult compile_result = nvrtcCompileProgram(program, 4, flags);
+
+    if (compile_result != NVRTC_SUCCESS)
     {
-      return sizeof(ulonglong2);
+      size_t log_size;
+      nvrtcGetProgramLogSize(program, &log_size);
+
+      char* log = new char[log_size];
+      nvrtcGetProgramLog(program, log);
+
+      std::cerr << "Compilation failed:\n" << log << std::endl;
+
+      delete[] log;
+      nvrtcDestroyProgram(&program);
+      throw std::runtime_error("Compilation failed");
     }
-    else if (accumulator_size == 4)
+
+    // Get PTX code
+    size_t ptx_size;
+    nvrtcGetPTXSize(program, &ptx_size);
+
+    std::string ptx_code(ptx_size, '\0');
+    nvrtcGetPTX(program, ptx_code.data());
+    nvrtcDestroyProgram(&program);
+
+    std::regex regex(R"(\.visible\s+\.global\s+\.align\s+\d+\s+\.u32\s+sizeof_word\s*=\s*(\d+);)");
+
+    std::smatch match;
+    if (std::regex_search(ptx_code, match, regex))
     {
-      return sizeof(uint2);
+      auto result = std::stoi(match[1].str());
+      std::cout << "sizeof_word: " << result << std::endl;
+      return result;
     }
     else
     {
-      return sizeof(unsigned int);
+      throw std::runtime_error("Could not find sizeof_word in PTX code");
     }
   }
 };
