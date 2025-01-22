@@ -225,7 +225,7 @@ extern "C" CCCL_C_API CUresult cccl_device_scan_build(
       op_src, // 6
       accum_cpp); // 7
 
-#if true // CCCL_DEBUGGING_SWITCH
+#if false // CCCL_DEBUGGING_SWITCH
     fflush(stderr);
     printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", src.c_str());
     fflush(stdout);
@@ -284,6 +284,8 @@ extern "C" CCCL_C_API CUresult cccl_device_scan_build(
     build->cubin            = (void*) result.cubin.release();
     build->cubin_size       = result.size;
     build->accumulator_type = accum_t;
+    build->cub_path         = cub_path;
+    build->libcudacxx_path  = libcudacxx_path;
   }
   catch (const std::exception& exc)
   {
@@ -332,7 +334,7 @@ struct scan_tile_state
     return cudaSuccess;
   }
 
-  static cudaError_t AllocationSize(int num_tiles, size_t& d_temp_storage_bytes, int sz)
+  static cudaError_t AllocationSize(int num_tiles, size_t& d_temp_storage_bytes, size_t sz)
   {
     d_temp_storage_bytes = (num_tiles + TILE_STATUS_PADDING) * sz;
     return cudaSuccess;
@@ -363,63 +365,43 @@ struct scan_kernel_source
 
   cudaError_t GetTileStateAllocationSize(int num_tiles, size_t& temp_storage_bytes)
   {
-    int sz = GetWordSize();
-    return scan_tile_state::AllocationSize(num_tiles, temp_storage_bytes, sz);
+    return scan_tile_state::AllocationSize(num_tiles, temp_storage_bytes, GetWordSize());
   }
 
-  int GetWordSize()
+  size_t GetWordSize()
   {
-    auto accum_type = cccl_type_enum_to_string(build.accumulator_type.type);
+    // get the word size by compiling a tiny program that instantiates
+    // cub::ScanTileState<AccumT> and introspecting its word size.
 
-    std::string_view kernel_code_template = R"(
-    #include <cub/agent/single_pass_scan_operators.cuh>
+    auto cc_major          = build.cc / 10;
+    auto cc_minor          = build.cc % 10;
+    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
 
-    __device__ unsigned sizeof_word = sizeof(typename cub::ScanTileState<{}>::TxnWord);
-    )";
-    std::string full_code                 = std::vformat(kernel_code_template, std::make_format_args(accum_type));
+    constexpr size_t num_args  = 5;
+    const char* args[num_args] = {arch.c_str(), build.cub_path, build.libcudacxx_path, "-rdc=true", "-dlto"};
 
-    // Compile the CUDA code into PTX using NVRTC
-    nvrtcProgram program;
-    nvrtcCreateProgram(&program, full_code.c_str(), "kernel.cu", 0, nullptr, nullptr);
+    auto accumulator_type = cccl_type_enum_to_string(build.accumulator_type.type);
+    std::string src       = std::format(
+      "#include <cub/agent/single_pass_scan_operators.cuh>\n"
+            "__device__ size_t sizeof_word = sizeof(typename cub::ScanTileState<{}>::TxnWord);\n",
+      accumulator_type);
+    const char* name                = "get_word_size";
+    constexpr size_t num_lto_args   = 3;
+    const char* lopts[num_lto_args] = {"-lto", arch.c_str(), "-ptx"};
 
-    // Set compiler flags
-    const char* flags[] = {
-      "--gpu-architecture=compute_75",
-      "--relocatable-device-code=true",
-      "-I/home/ashwin/workspace/cccl/cub",
-      "-I/home/ashwin/workspace/cccl/libcudacxx/include"};
-    nvrtcResult compile_result = nvrtcCompileProgram(program, 4, flags);
+    nvrtc_cubin compile_result =
+      make_nvrtc_command_list()
+        .add_program(nvrtc_translation_unit{src.c_str(), name})
+        .compile_program({args, num_args})
+        .cleanup_program()
+        .finalize_program(num_lto_args, lopts);
+    auto ptx_code = compile_result.cubin.get();
 
-    if (compile_result != NVRTC_SUCCESS)
-    {
-      size_t log_size;
-      nvrtcGetProgramLogSize(program, &log_size);
-
-      char* log = new char[log_size];
-      nvrtcGetProgramLog(program, log);
-
-      std::cerr << "Compilation failed:\n" << log << std::endl;
-
-      delete[] log;
-      nvrtcDestroyProgram(&program);
-      throw std::runtime_error("Compilation failed");
-    }
-
-    // Get PTX code
-    size_t ptx_size;
-    nvrtcGetPTXSize(program, &ptx_size);
-
-    std::string ptx_code(ptx_size, '\0');
-    nvrtcGetPTX(program, ptx_code.data());
-    nvrtcDestroyProgram(&program);
-
-    std::regex regex(R"(\.visible\s+\.global\s+\.align\s+\d+\s+\.u32\s+sizeof_word\s*=\s*(\d+);)");
-
-    std::smatch match;
+    std::regex regex(R"(\.visible\s+\.global\s+\.align\s+\d+\s+\.u64\s+sizeof_word\s*=\s*(\d+);)");
+    std::cmatch match;
     if (std::regex_search(ptx_code, match, regex))
     {
       auto result = std::stoi(match[1].str());
-      std::cout << "sizeof_word: " << result << std::endl;
       return result;
     }
     else

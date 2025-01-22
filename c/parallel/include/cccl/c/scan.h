@@ -27,6 +27,8 @@ struct cccl_device_scan_build_result_t
   cccl_type_info accumulator_type;
   CUkernel init_kernel;
   CUkernel scan_kernel;
+  const char* cub_path;
+  const char* libcudacxx_path;
 };
 
 extern "C" CCCL_C_API CUresult cccl_device_scan_build(
