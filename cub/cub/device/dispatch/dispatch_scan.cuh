@@ -104,9 +104,16 @@ struct DeviceScanKernelSource
     return ScanTileStateT();
   }
 
-  CUB_RUNTIME_FUNCTION cudaError_t GetTileStateAllocationSize(int num_tiles, size_t& temp_storage_bytes)
+  CUB_RUNTIME_FUNCTION cudaError_t
+  TileStateInit(ScanTileStateT& tile_state, int num_tiles, void* d_temp_storage, size_t temp_storage_bytes)
   {
-    return ScanTileStateT::AllocationSize(num_tiles, temp_storage_bytes);
+    return tile_state.Init(num_tiles, d_temp_storage, temp_storage_bytes);
+  }
+
+  CUB_RUNTIME_FUNCTION cudaError_t
+  GetTileStateAllocationSize(ScanTileStateT const& tile_state, int num_tiles, size_t& temp_storage_bytes)
+  {
+    return decltype(tile_state)::AllocationSize(num_tiles, temp_storage_bytes);
   }
 };
 
@@ -283,9 +290,12 @@ struct DispatchScan
       int tile_size = policy.Scan().BlockThreads() * policy.Scan().ItemsPerThread();
       int num_tiles = static_cast<int>(::cuda::ceil_div(num_items, tile_size));
 
+      auto tile_state = kernel_source.TileState();
+
       // Specify temporary storage allocation requirements
       size_t allocation_sizes[1];
-      error = CubDebug(kernel_source.GetTileStateAllocationSize(num_tiles, allocation_sizes[0]));
+
+      error = CubDebug(kernel_source.GetTileStateAllocationSize(tile_state, num_tiles, allocation_sizes[0]));
       if (cudaSuccess != error)
       {
         break; // bytes needed for tile status descriptors
@@ -315,8 +325,7 @@ struct DispatchScan
       }
 
       // Construct the tile status interface
-      auto tile_state = kernel_source.TileState();
-      error           = CubDebug(tile_state.Init(num_tiles, allocations[0], allocation_sizes[0]));
+      error = CubDebug(kernel_source.TileStateInit(tile_state, num_tiles, allocations[0], allocation_sizes[0]));
       if (cudaSuccess != error)
       {
         break;

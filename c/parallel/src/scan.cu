@@ -367,7 +367,13 @@ struct scan_kernel_source
     return scan_tile_state(build.accumulator_type);
   }
 
-  cudaError_t GetTileStateAllocationSize(int num_tiles, size_t& temp_storage_bytes)
+  cudaError_t TileStateInit(scan_tile_state& tile_state, int num_tiles, void* d_temp_storage, size_t temp_storage_bytes)
+  {
+    return tile_state.Init(num_tiles, d_temp_storage, temp_storage_bytes);
+  }
+
+  cudaError_t
+  GetTileStateAllocationSize(scan_tile_state const& /*tile_state*/, int num_tiles, size_t& temp_storage_bytes)
   {
     return scan_tile_state::AllocationSize(num_tiles, temp_storage_bytes, GetWordSize());
   }
