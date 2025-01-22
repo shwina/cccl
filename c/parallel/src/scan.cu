@@ -319,18 +319,22 @@ struct scan_tile_state
     TILE_STATUS_PADDING = CUB_PTX_WARP_THREADS,
   };
 
-  void* d_tile_descriptor;
+  void* d_tile_status;
+  void* d_tile_partial;
+  void* d_tile_inclusive;
 
   cccl_type_info accum_type;
 
   scan_tile_state(cccl_type_info accum_type)
-      : d_tile_descriptor(nullptr)
+      : d_tile_status(nullptr)
+      , d_tile_partial(nullptr)
+      , d_tile_inclusive(nullptr)
       , accum_type(accum_type)
   {}
 
   cudaError_t Init(int, void* d_temp_storage, size_t)
   {
-    d_tile_descriptor = d_temp_storage;
+    d_tile_status = d_temp_storage;
     return cudaSuccess;
   }
 
@@ -390,7 +394,6 @@ struct scan_kernel_source
       build.accumulator_type.alignment,
       accumulator_type_name);
 
-    std::cout << src << std::endl;
     const char* name                = "get_word_size";
     constexpr size_t num_lto_args   = 3;
     const char* lopts[num_lto_args] = {"-lto", arch.c_str(), "-ptx"};

@@ -47,70 +47,71 @@ void scan(cccl_iterator_t input, cccl_iterator_t output, unsigned long long num_
   REQUIRE(CUDA_SUCCESS == cccl_device_scan_cleanup(&build));
 }
 
-// using integral_types = std::tuple<int32_t, uint32_t, int64_t, uint64_t>;
-// TEMPLATE_LIST_TEST_CASE("Scan works with integral types", "[reduce]", integral_types)
-// {
-//   const std::size_t num_items       = GENERATE(0, 42, take(4, random(1 << 12, 1 << 16)));
-//   operation_t op                    = make_operation("op", get_reduce_op(get_type_info<TestType>().type));
-//   const std::vector<TestType> input = generate<TestType>(num_items);
-//   const std::vector<TestType> output(num_items, 0);
-//   pointer_t<TestType> input_ptr(input);
-//   pointer_t<TestType> output_ptr(output);
-//   value_t<TestType> init{TestType{42}};
-
-//   scan(input_ptr, output_ptr, num_items, op, init);
-
-//   std::vector<TestType> expected(num_items, 0);
-//   std::exclusive_scan(input.begin(), input.end(), expected.begin(), init.value);
-//   if (num_items > 0)
-//   {
-//     auto output_vec = std::vector<TestType>(output_ptr);
-//     REQUIRE(check_vectors_equal(expected, output_vec));
-//   }
-// }
-
-struct pair
+using integral_types = std::tuple<int32_t, uint32_t, int64_t, uint64_t>;
+TEMPLATE_LIST_TEST_CASE("Scan works with integral types", "[reduce]", integral_types)
 {
-  short a;
-  size_t b;
-
-  bool operator==(const pair& other) const
-  {
-    return a == other.a && b == other.b;
-  }
-};
-
-TEST_CASE("Scan works with custom types", "[scan]")
-{
-  const std::size_t num_items = GENERATE(0, 42, take(4, random(1 << 12, 1 << 24)));
-
-  operation_t op = make_operation(
-    "op",
-    "struct pair { short a; size_t b; };\n"
-    "extern \"C\" __device__ pair op(pair lhs, pair rhs) {\n"
-    "  return pair{ lhs.a + rhs.a, lhs.b + rhs.b };\n"
-    "}");
-  const std::vector<short> a  = generate<short>(num_items);
-  const std::vector<size_t> b = generate<size_t>(num_items);
-  std::vector<pair> input(num_items);
-  std::vector<pair> output(num_items);
-  for (std::size_t i = 0; i < num_items; ++i)
-  {
-    input[i] = pair{a[i], b[i]};
-  }
-  pointer_t<pair> input_ptr(input);
-  pointer_t<pair> output_ptr(output);
-  value_t<pair> init{pair{4, 2}};
+  const std::size_t num_items       = GENERATE(0, 42, take(4, random(1 << 12, 1 << 16)));
+  operation_t op                    = make_operation("op", get_reduce_op(get_type_info<TestType>().type));
+  const std::vector<TestType> input = generate<TestType>(num_items);
+  const std::vector<TestType> output(num_items, 0);
+  pointer_t<TestType> input_ptr(input);
+  pointer_t<TestType> output_ptr(output);
+  value_t<TestType> init{TestType{42}};
 
   scan(input_ptr, output_ptr, num_items, op, init);
 
-  std::vector<pair> expected(num_items, {0, 0});
-  std::exclusive_scan(input.begin(), input.end(), expected.begin(), init.value, [](const pair& lhs, const pair& rhs) {
-    return pair{short(lhs.a + rhs.a), lhs.b + rhs.b};
-  });
+  std::vector<TestType> expected(num_items, 0);
+  std::exclusive_scan(input.begin(), input.end(), expected.begin(), init.value);
   if (num_items > 0)
   {
-    auto output_vec = std::vector<pair>(output_ptr);
+    auto output_vec = std::vector<TestType>(output_ptr);
     REQUIRE(check_vectors_equal(expected, output_vec));
   }
 }
+
+// struct pair
+// {
+//   short a;
+//   size_t b;
+
+//   bool operator==(const pair& other) const
+//   {
+//     return a == other.a && b == other.b;
+//   }
+// };
+
+// TEST_CASE("Scan works with custom types", "[scan]")
+// {
+//   const std::size_t num_items = GENERATE(0, 42, take(4, random(1 << 12, 1 << 24)));
+
+//   operation_t op = make_operation(
+//     "op",
+//     "struct pair { short a; size_t b; };\n"
+//     "extern \"C\" __device__ pair op(pair lhs, pair rhs) {\n"
+//     "  return pair{ lhs.a + rhs.a, lhs.b + rhs.b };\n"
+//     "}");
+//   const std::vector<short> a  = generate<short>(num_items);
+//   const std::vector<size_t> b = generate<size_t>(num_items);
+//   std::vector<pair> input(num_items);
+//   std::vector<pair> output(num_items);
+//   for (std::size_t i = 0; i < num_items; ++i)
+//   {
+//     input[i] = pair{a[i], b[i]};
+//   }
+//   pointer_t<pair> input_ptr(input);
+//   pointer_t<pair> output_ptr(output);
+//   value_t<pair> init{pair{4, 2}};
+
+//   scan(input_ptr, output_ptr, num_items, op, init);
+
+//   std::vector<pair> expected(num_items, {0, 0});
+//   std::exclusive_scan(input.begin(), input.end(), expected.begin(), init.value, [](const pair& lhs, const pair& rhs)
+//   {
+//     return pair{short(lhs.a + rhs.a), lhs.b + rhs.b};
+//   });
+//   if (num_items > 0)
+//   {
+//     auto output_vec = std::vector<pair>(output_ptr);
+//     REQUIRE(check_vectors_equal(expected, output_vec));
+//   }
+// }
