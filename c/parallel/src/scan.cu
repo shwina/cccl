@@ -372,7 +372,6 @@ struct scan_kernel_source
   {
     // get the word size by compiling a tiny program that instantiates
     // cub::ScanTileState<AccumT> and introspecting its word size.
-
     auto cc_major          = build.cc / 10;
     auto cc_minor          = build.cc % 10;
     const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
@@ -380,11 +379,18 @@ struct scan_kernel_source
     constexpr size_t num_args  = 5;
     const char* args[num_args] = {arch.c_str(), build.cub_path, build.libcudacxx_path, "-rdc=true", "-dlto"};
 
-    auto accumulator_type = cccl_type_enum_to_string(build.accumulator_type.type);
-    std::string src       = std::format(
+    auto accumulator_type_name = cccl_type_enum_to_string(build.accumulator_type.type);
+    std::string src            = std::format(
       "#include <cub/agent/single_pass_scan_operators.cuh>\n"
-            "__device__ size_t sizeof_word = sizeof(typename cub::ScanTileState<{}>::TxnWord);\n",
-      accumulator_type);
+                 "struct __align__({1}) storage_t {{\n"
+                 "  char data[{0}];\n"
+                 "}};\n"
+                 "__device__ size_t sizeof_word = sizeof(typename cub::ScanTileState<{2}>::TxnWord);\n",
+      build.accumulator_type.size,
+      build.accumulator_type.alignment,
+      accumulator_type_name);
+
+    std::cout << src << std::endl;
     const char* name                = "get_word_size";
     constexpr size_t num_lto_args   = 3;
     const char* lopts[num_lto_args] = {"-lto", arch.c_str(), "-ptx"};
