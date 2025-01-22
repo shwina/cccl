@@ -350,3 +350,10 @@ struct value_t
     return v;
   }
 };
+
+template <typename T>
+bool check_vectors_equal(const std::vector<T>& vec1, const std::vector<T>& vec2)
+{
+  // Check if the sizes are the same, then compare elements using std::equal
+  return vec1.size() == vec2.size() && std::equal(vec1.begin(), vec1.end(), vec2.begin());
+}

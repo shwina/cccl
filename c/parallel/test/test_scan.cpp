@@ -49,7 +49,7 @@ void scan(cccl_iterator_t input, cccl_iterator_t output, unsigned long long num_
 using integral_types = std::tuple<int32_t, uint32_t, int64_t, uint64_t>;
 TEMPLATE_LIST_TEST_CASE("Scan works with integral types", "[reduce]", integral_types)
 {
-  const std::size_t num_items       = GENERATE(0, 42, take(4, random(1 << 12, 1 << 24)));
+  const std::size_t num_items       = GENERATE(0, 42, take(4, random(1 << 12, 1 << 16)));
   operation_t op                    = make_operation("op", get_reduce_op(get_type_info<TestType>().type));
   const std::vector<TestType> input = generate<TestType>(num_items);
   const std::vector<TestType> output(num_items, 0);
@@ -63,7 +63,7 @@ TEMPLATE_LIST_TEST_CASE("Scan works with integral types", "[reduce]", integral_t
   std::exclusive_scan(input.begin(), input.end(), expected.begin(), init.value);
   if (num_items > 0)
   {
-    const TestType output_val = output_ptr[num_items - 1];
-    REQUIRE(expected[num_items - 1] == output_val);
+    auto output_vec = std::vector<TestType>(output_ptr);
+    REQUIRE(check_vectors_equal(expected, output_vec));
   }
 }
