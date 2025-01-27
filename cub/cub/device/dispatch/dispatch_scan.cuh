@@ -78,7 +78,7 @@ struct DeviceScanKernelSource
 {
   using ScanTileStateT = typename cub::ScanTileState<AccumT>;
 
-  CUB_DEFINE_KERNEL_GETTER(ScanInitKernel, DeviceScanInitKernel<ScanTileStateT>)
+  CUB_DEFINE_KERNEL_GETTER(InitKernel, DeviceScanInitKernel<ScanTileStateT>)
 
   CUB_DEFINE_KERNEL_GETTER(
     ScanKernel,
@@ -95,6 +95,11 @@ struct DeviceScanKernelSource
   CUB_RUNTIME_FUNCTION static constexpr std::size_t AccumSize()
   {
     return sizeof(AccumT);
+  }
+
+  CUB_RUNTIME_FUNCTION ScanTileStateT TileState()
+  {
+    return ScanTileStateT();
   }
 };
 
@@ -150,7 +155,6 @@ template <typename InputIteratorT,
             AccumT,
             ForceInclusive>,
           typename KernelLauncherFactory = detail::TripleChevronFactory>
-
 struct DispatchScan
 {
   //---------------------------------------------------------------------
@@ -158,9 +162,6 @@ struct DispatchScan
   //---------------------------------------------------------------------
 
   static constexpr int INIT_KERNEL_THREADS = 128;
-
-  // The input value type
-  using InputT = cub::detail::value_t<InputIteratorT>;
 
   /// Device-accessible allocation of temporary storage.  When nullptr, the
   /// required allocation size is written to \p temp_storage_bytes and no work
@@ -252,13 +253,12 @@ struct DispatchScan
   CUB_RUNTIME_FUNCTION _CCCL_HOST _CCCL_FORCEINLINE cudaError_t
   Invoke(InitKernelT init_kernel, ScanKernelT scan_kernel, ActivePolicyT policy = {})
   {
-    using ScanTileStateT = typename KernelSource::ScanTileStateT;
-
+    // TODO(ashwin): Does this now need to be a runtime check?
     // `LOAD_LDG` makes in-place execution UB and doesn't lead to better
     // performance.
-    static_assert(policy.LoadModifier() != CacheLoadModifier::LOAD_LDG,
-                  "The memory consistency model does not apply to texture "
-                  "accesses");
+    // static_assert(policy.LoadModifier() != CacheLoadModifier::LOAD_LDG,
+    //               "The memory consistency model does not apply to texture "
+    //               "accesses");
 
     cudaError error = cudaSuccess;
     do
@@ -275,9 +275,12 @@ struct DispatchScan
       int tile_size = policy.Scan().BlockThreads() * policy.Scan().ItemsPerThread();
       int num_tiles = static_cast<int>(::cuda::ceil_div(num_items, tile_size));
 
+      auto tile_state = kernel_source.TileState();
+
       // Specify temporary storage allocation requirements
       size_t allocation_sizes[1];
-      error = CubDebug(ScanTileStateT::AllocationSize(num_tiles, allocation_sizes[0]));
+
+      error = CubDebug(tile_state.AllocationSize(num_tiles, allocation_sizes[0]));
       if (cudaSuccess != error)
       {
         break; // bytes needed for tile status descriptors
@@ -307,7 +310,6 @@ struct DispatchScan
       }
 
       // Construct the tile status interface
-      ScanTileStateT tile_state;
       error = CubDebug(tile_state.Init(num_tiles, allocations[0], allocation_sizes[0]));
       if (cudaSuccess != error)
       {
@@ -391,17 +393,15 @@ struct DispatchScan
         }
       }
     } while (0);
-
     return error;
   }
 
   template <typename ActivePolicyT>
   CUB_RUNTIME_FUNCTION _CCCL_HOST _CCCL_FORCEINLINE cudaError_t Invoke(ActivePolicyT active_policy = {})
   {
-    using ScanTileStateT = typename KernelSource::ScanTileStateT;
-    auto wrapped_policy  = detail::scan::MakeScanPolicyWrapper(active_policy);
+    auto wrapped_policy = detail::scan::MakeScanPolicyWrapper(active_policy);
     // Ensure kernels are instantiated.
-    return Invoke(kernel_source.ScanInitKernel(), kernel_source.ScanKernel(), wrapped_policy);
+    return Invoke(kernel_source.InitKernel(), kernel_source.ScanKernel(), wrapped_policy);
   }
 
   /**
