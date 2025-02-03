@@ -358,7 +358,7 @@ ThreadStore(T* ptr, T val, Int2Type<MODIFIER> /*modifier*/, Int2Type<true> /*is_
 template <CacheStoreModifier MODIFIER, typename OutputIteratorT, typename T>
 _CCCL_DEVICE _CCCL_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
 {
-  ThreadStore(itr, val, Int2Type<MODIFIER>(), Int2Type<cuda::std::is_pointer<OutputIteratorT>::value>());
+  ThreadStore(itr, val, Int2Type<MODIFIER>(), Int2Type<::cuda::std::is_pointer<OutputIteratorT>::value>());
 }
 
 #endif // _CCCL_DOXYGEN_INVOKED
