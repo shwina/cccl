@@ -9,8 +9,6 @@ from typing import List
 
 from cuda.cccl import get_include_paths  # type: ignore[import-not-found]
 
-from . import _cccl as cccl
-
 
 @lru_cache()
 def get_bindings() -> ctypes.CDLL:
@@ -21,19 +19,6 @@ def get_bindings() -> ctypes.CDLL:
     with as_file(files("cuda.parallel.experimental")) as f:
         cccl_c_path = str(f / "cccl" / "libcccl.c.parallel.so")
     _bindings = ctypes.CDLL(cccl_c_path)
-    _bindings.cccl_device_reduce.restype = ctypes.c_int
-    _bindings.cccl_device_reduce.argtypes = [
-        cccl.DeviceReduceBuildResult,
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_ulonglong),
-        cccl.Iterator,
-        cccl.Iterator,
-        ctypes.c_ulonglong,
-        cccl.Op,
-        cccl.Value,
-        ctypes.c_void_p,
-    ]
-    _bindings.cccl_device_reduce_cleanup.restype = ctypes.c_int
     return _bindings
 
 
