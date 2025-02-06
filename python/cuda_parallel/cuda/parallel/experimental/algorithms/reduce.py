@@ -14,6 +14,8 @@ import numpy as np
 from numba import cuda
 from numba.cuda.cudadrv import enums
 
+from cuda.core.experimental.utils import StridedMemoryView
+
 from .. import _cccl as cccl
 from .._bindings import get_bindings, get_paths
 from .._caching import CachableFunction, cache_with_key
@@ -60,7 +62,6 @@ class _Reduce:
     ):
         # Referenced from __del__:
         self.build_result = None
-
         self.d_in_cccl = cccl.to_cccl_iter(d_in)
         self.d_out_cccl = cccl.to_cccl_iter(d_out)
         self.h_init_cccl = cccl.to_cccl_value(h_init)
@@ -100,26 +101,14 @@ class _Reduce:
         h_init: np.ndarray | GpuStruct,
         stream=None,
     ):
-        if self.d_in_cccl.type.value == cccl.IteratorKind.ITERATOR:
-            assert num_items is not None
-        else:
-            assert self.d_in_cccl.type.value == cccl.IteratorKind.POINTER
-            if num_items is None:
-                num_items = d_in.size
-            else:
-                assert num_items == d_in.size
-        _dtype_validation(
-            self._ctor_d_in_cccl_type_enum_name,
-            cccl.type_enum_as_name(self.d_in_cccl.value_type.type.value),
-        )
-        _dtype_validation(self._ctor_d_out_dtype, protocols.get_dtype(d_out))
-        _dtype_validation(self._ctor_init_dtype, h_init.dtype)
+        d_in = StridedMemoryView(d_in, stream_ptr=1)
+        d_out = StridedMemoryView(d_out, stream_ptr=1)
         if self.d_in_cccl.type.value == 0:
-            self.d_in_cccl.state = protocols.get_data_pointer(d_in)
+            self.d_in_cccl.state = d_in.ptr
         else:
             self.d_in_cccl.state = d_in.state
         if self.d_in_cccl.type.value == 0:
-            self.d_out_cccl.state = protocols.get_data_pointer(d_out)
+            self.d_out_cccl.state = d_out.ptr
         else:
             self.d_out_cccl.state = d_out.state
         self.h_init_cccl.state = h_init.__array_interface__["data"][0]
