@@ -23,8 +23,8 @@ def get_data_pointer(arr: DeviceArrayLike) -> int:
 
 def get_dtype(arr: DeviceArrayLike) -> np.dtype:
     try:
-        return arr.dtype  # type: ignore
-    except AttributeError:
+        return np.dtype(arr.dtype)  # type: ignore
+    except Exception:
         typestr = arr.__cuda_array_interface__["typestr"]
 
         if typestr.startswith("|V"):
@@ -38,14 +38,14 @@ def get_dtype(arr: DeviceArrayLike) -> np.dtype:
 def get_strides(arr: DeviceArrayLike) -> Optional[Tuple]:
     try:
         return arr.strides  # type: ignore
-    except AttributeError:
+    except Exception:
         return arr.__cuda_array_interface__["strides"]
 
 
 def get_shape(arr: DeviceArrayLike) -> Tuple:
     try:
-        return arr.shape  # type: ignore
-    except AttributeError:
+        return tuple(arr.shape)  # type: ignore
+    except Exception:
         return arr.__cuda_array_interface__["shape"]
 
 
