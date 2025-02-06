@@ -74,7 +74,7 @@ class _Reduce:
         bindings = get_bindings()
         self.op_wrapper = _Op(h_init, op)
         self.build_result = cccl.DeviceReduceBuildResult()
-
+        self.bindings = get_bindings()
         error = bindings.cccl_device_reduce_build(
             ctypes.byref(self.build_result),
             self.d_in_cccl,
@@ -100,40 +100,31 @@ class _Reduce:
         h_init: np.ndarray | GpuStruct,
         stream=None,
     ):
-        if self.d_in_cccl.type.value == cccl.IteratorKind.ITERATOR:
-            assert num_items is not None
-        else:
-            assert self.d_in_cccl.type.value == cccl.IteratorKind.POINTER
-            if num_items is None:
-                num_items = d_in.size
-            else:
-                assert num_items == d_in.size
-        _dtype_validation(
-            self._ctor_d_in_cccl_type_enum_name,
-            cccl.type_enum_as_name(self.d_in_cccl.value_type.type.value),
-        )
-        _dtype_validation(self._ctor_d_out_dtype, protocols.get_dtype(d_out))
-        _dtype_validation(self._ctor_init_dtype, h_init.dtype)
-        if self.d_in_cccl.type.value == 0:
+        if self.d_in_cccl.type.value == cccl.IteratorKind.POINTER:
             self.d_in_cccl.state = protocols.get_data_pointer(d_in)
         else:
             self.d_in_cccl.state = d_in.state
-        if self.d_in_cccl.type.value == 0:
+
+        if self.d_out_cccl.type.value == cccl.IteratorKind.POINTER:
             self.d_out_cccl.state = protocols.get_data_pointer(d_out)
         else:
             self.d_out_cccl.state = d_out.state
-        self.h_init_cccl.state = h_init.__array_interface__["data"][0]
+
+        if self.h_init_cccl.type.type == cccl.TypeEnum.STORAGE:
+            self.h_init_cccl.state = h_init._data.__array_interface__["data"][0]  # type: ignore
+        else:
+            self.h_init_cccl.state = h_init.__array_interface__["data"][0]
+
         stream_handle = protocols.validate_and_get_stream(stream)
-        bindings = get_bindings()
+
         if temp_storage is None:
             temp_storage_bytes = ctypes.c_size_t()
             d_temp_storage = None
         else:
             temp_storage_bytes = ctypes.c_size_t(temp_storage.nbytes)
-            # Note: this is slightly slower, but supports all ndarray-like objects as long as they support CAI
-            # TODO: switch to use gpumemoryview once it's ready
-            d_temp_storage = temp_storage.__cuda_array_interface__["data"][0]
-        error = bindings.cccl_device_reduce(
+            d_temp_storage = protocols.get_data_pointer(temp_storage)
+
+        error = self.bindings.cccl_device_reduce(
             self.build_result,
             d_temp_storage,
             ctypes.byref(temp_storage_bytes),
@@ -144,6 +135,7 @@ class _Reduce:
             self.h_init_cccl,
             stream_handle,
         )
+
         if error != enums.CUDA_SUCCESS:
             raise ValueError("Error reducing")
 
