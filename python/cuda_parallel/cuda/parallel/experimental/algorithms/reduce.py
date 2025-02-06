@@ -110,10 +110,7 @@ class _Reduce:
         else:
             self.d_out_cccl.state = d_out.state
 
-        if self.h_init_cccl.type.type.value == cccl.TypeEnum.STORAGE:
-            self.h_init_cccl.state = h_init._data.__array_interface__["data"][0]  # type: ignore
-        else:
-            self.h_init_cccl.state = h_init.__array_interface__["data"][0]
+        self.h_init_cccl.state = h_init.__array_interface__["data"][0]
 
         stream_handle = protocols.validate_and_get_stream(stream)
 
