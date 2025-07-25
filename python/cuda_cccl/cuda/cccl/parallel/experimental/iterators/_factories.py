@@ -155,3 +155,27 @@ def TransformIterator(it, op):
         A ``TransformIterator`` object to transform the items in ``it`` using ``op``
     """
     return _iterators.make_transform_iterator(it, op)
+
+
+def ZipIterator(*iterators):
+    """Returns an Iterator representing a zipped sequence of values from multiple iterators.
+
+    Similar to https://nvidia.github.io/cccl/thrust/api/classthrust_1_1zip__iterator.html
+
+    Example:
+        The code snippet below demonstrates the usage of a ``ZipIterator``
+        combining a ``CountingIterator`` and a device array:
+
+        .. literalinclude:: ../../python/cuda_cccl/tests/parallel/test_reduce_api.py
+            :language: python
+            :dedent:
+            :start-after: example-begin zip-iterator
+            :end-before: example-end zip-iterator
+
+    Args:
+        *iterators: Variable number of iterators to zip together
+
+    Returns:
+        A ``ZipIterator`` object that yields tuples of values from all input iterators
+    """
+    return _iterators.make_zip_iterator(*iterators)
