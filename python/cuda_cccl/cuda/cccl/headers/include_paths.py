@@ -2,43 +2,30 @@
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-import os
-import shutil
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-
-def _get_cuda_path() -> Optional[Path]:
-    cuda_path_str = os.environ.get("CUDA_PATH")
-    if cuda_path_str:
-        cuda_path = Path(cuda_path_str)
-        if cuda_path.exists():
-            return cuda_path
-
-    nvcc_path = shutil.which("nvcc")
-    if nvcc_path:
-        return Path(nvcc_path).parent.parent
-
-    default_path = Path("/usr/local/cuda")
-    if default_path.exists():
-        return default_path
-
-    return None
+from cuda.cccl._version_utils import (
+    detect_cuda_version,
+    get_cuda_path,
+    validate_cuda_version,
+)
 
 
 @dataclass
 class IncludePaths:
     cuda: Optional[Path]
-    libcudacxx: Optional[Path]
-    cub: Optional[Path]
-    thrust: Optional[Path]
+    libcudacxx: Path
+    cub: Path
+    thrust: Path
+    cuda_version: Optional[int] = None
 
     def as_tuple(self):
         # Note: higher-level ... lower-level order:
-        return (self.thrust, self.cub, self.libcudacxx, self.cuda)
+        return (self.libcudacxx, self.cub, self.thrust, self.cuda)
 
 
 @lru_cache()
@@ -48,9 +35,14 @@ def get_include_paths(probe_file: str = "cub/version.cuh") -> IncludePaths:
     from importlib.resources import as_file, files
 
     cuda_incl = None
-    cuda_path = _get_cuda_path()
+    cuda_version = None
+    cuda_path = get_cuda_path()
     if cuda_path is not None:
         cuda_incl = cuda_path / "include"
+        cuda_version = detect_cuda_version()
+
+    # Provide helpful error message if CUDA version is not supported
+    validate_cuda_version(cuda_version)
 
     with as_file(files("cuda.cccl.headers.include")) as f:
         cccl_incl = Path(f)
@@ -69,4 +61,5 @@ def get_include_paths(probe_file: str = "cub/version.cuh") -> IncludePaths:
         libcudacxx=cccl_incl,
         cub=cccl_incl,
         thrust=cccl_incl,
+        cuda_version=cuda_version,
     )
