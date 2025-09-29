@@ -10,7 +10,7 @@ import numba
 import numpy as np
 import pytest
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 
 def get_mark(dt, log_size):
@@ -370,7 +370,7 @@ def test_radix_sort():
     import cupy as cp
     import numpy as np
 
-    import cuda.cccl.parallel.experimental as parallel
+    import cuda.parallel as parallel
 
     h_in_keys = np.array([-5, 0, 2, -3, 2, 4, 0, -1, 2, 8], dtype="int32")
     h_in_values = np.array(
@@ -409,7 +409,7 @@ def test_radix_sort_double_buffer():
     import cupy as cp
     import numpy as np
 
-    import cuda.cccl.parallel.experimental as parallel
+    import cuda.parallel as parallel
 
     h_in_keys = np.array([-5, 0, 2, -3, 2, 4, 0, -1, 2, 8], dtype="int32")
     h_in_values = np.array(

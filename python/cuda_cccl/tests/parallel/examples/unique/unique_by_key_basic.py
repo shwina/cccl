@@ -11,7 +11,7 @@ but the first value for each group of consecutive keys.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Prepare the input and output arrays.
 h_in_keys = np.array([0, 2, 2, 9, 5, 5, 5, 8], dtype="int32")

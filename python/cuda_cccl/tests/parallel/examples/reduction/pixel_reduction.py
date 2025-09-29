@@ -11,7 +11,7 @@ with a custom data type.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 
 # Define a custom data type to store the pixel values.

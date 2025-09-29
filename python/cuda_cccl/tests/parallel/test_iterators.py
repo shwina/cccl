@@ -3,10 +3,10 @@ import numba.cuda
 import numpy as np
 import pytest
 
-from cuda.cccl.parallel.experimental._utils.protocols import (
+from cuda.parallel._utils.protocols import (
     compute_c_contiguous_strides_in_bytes,
 )
-from cuda.cccl.parallel.experimental.iterators import (
+from cuda.parallel.iterators import (
     CacheModifiedInputIterator,
     ConstantIterator,
     CountingIterator,

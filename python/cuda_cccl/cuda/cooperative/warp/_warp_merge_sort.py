@@ -4,8 +4,8 @@
 
 import numba
 
-from cuda.cccl.cooperative.experimental._common import make_binary_tempfile
-from cuda.cccl.cooperative.experimental._types import (
+from cuda.cooperative._common import make_binary_tempfile
+from cuda.cooperative._types import (
     Algorithm,
     Constant,
     Dependency,

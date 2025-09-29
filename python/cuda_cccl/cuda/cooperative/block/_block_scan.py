@@ -73,16 +73,16 @@ from typing import Any, Callable, Literal
 
 import numba
 
-from cuda.cccl.cooperative.experimental._common import (
+from cuda.cooperative._common import (
     CUB_BLOCK_SCAN_ALGOS,
     make_binary_tempfile,
     normalize_dim_param,
     normalize_dtype_param,
 )
-from cuda.cccl.cooperative.experimental._scan_op import (
+from cuda.cooperative._scan_op import (
     ScanOp,
 )
-from cuda.cccl.cooperative.experimental._types import (
+from cuda.cooperative._types import (
     Algorithm,
     Dependency,
     DependentArray,
@@ -94,7 +94,7 @@ from cuda.cccl.cooperative.experimental._types import (
     TemplateParameter,
     numba_type_to_wrapper,
 )
-from cuda.cccl.cooperative.experimental._typing import (
+from cuda.cooperative._typing import (
     DimType,
     DtypeType,
     ScanOpType,

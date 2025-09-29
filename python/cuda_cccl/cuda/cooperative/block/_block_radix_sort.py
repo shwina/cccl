@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Tuple, Union
 
 import numba
 
-from cuda.cccl.cooperative.experimental._common import (
+from cuda.cooperative._common import (
     CUB_BLOCK_SCAN_ALGOS,
     CudaSharedMemConfig,
     dim3,
@@ -14,7 +14,7 @@ from cuda.cccl.cooperative.experimental._common import (
     normalize_dim_param,
     normalize_dtype_param,
 )
-from cuda.cccl.cooperative.experimental._types import (
+from cuda.cooperative._types import (
     Algorithm,
     Dependency,
     DependentArray,

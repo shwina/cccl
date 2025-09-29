@@ -1,7 +1,7 @@
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # example-begin
 """

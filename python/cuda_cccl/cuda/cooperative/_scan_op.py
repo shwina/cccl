@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 """
-cuda.cccl.cooperative.experimental._scan_op
+cuda.cooperative._scan_op
 ======================================
 
 This module implements the ``ScanOp`` class and related functions.
@@ -14,7 +14,7 @@ from enum import Enum
 
 import numpy as np
 
-from cuda.cccl.cooperative.experimental._typing import (
+from cuda.cooperative._typing import (
     ScanOpType,
 )
 

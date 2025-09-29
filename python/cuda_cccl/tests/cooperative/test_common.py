@@ -6,7 +6,7 @@ import numba
 import numpy as np
 import pytest
 
-from cuda.cccl.cooperative.experimental._common import (
+from cuda.cooperative._common import (
     CudaSharedMemConfig,
     dim3,
     normalize_dim_param,

@@ -35,8 +35,8 @@ from numba.core.extending import (
     typeof_impl,
 )
 
-import cuda.cccl.cooperative.experimental as coop
-from cuda.cccl.cooperative.experimental.block._block_scan import (
+import cuda.cooperative as coop
+from cuda.cooperative.block._block_scan import (
     ScanOp,
 )
 

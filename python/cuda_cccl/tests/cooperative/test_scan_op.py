@@ -5,7 +5,7 @@
 """
 test_scan_op.py
 
-This file contains unit tests for the cuda.cccl.cooperative.experimental._scan_op
+This file contains unit tests for the cuda.cooperative._scan_op
 module's ``ScanOp`` class and related functionality.
 """
 
@@ -14,7 +14,7 @@ import operator
 import numpy as np
 import pytest
 
-from cuda.cccl.cooperative.experimental._scan_op import (
+from cuda.cooperative._scan_op import (
     CUDA_MAXIMUM,
     CUDA_MINIMUM,
     CUDA_STD_BIT_AND,

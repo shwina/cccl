@@ -105,13 +105,13 @@ def exchange(
         perform.  Currently, only :py:attr:`StripedToBlocked` is supported.
 
     :param dtype: Supplies the data type of the input and output arrays.
-    :type dtype: :py:class:`cuda.cccl.cooperative.experimental._typing.DtypeType`
+    :type dtype: :py:class:`cuda.cooperative._typing.DtypeType`
 
     :param threads_per_block: Supplies the number of threads in the block,
         either as an integer for a 1D block or a tuple of two or three integers
         for a 2D or 3D block, respectively.
     :type threads_per_block:
-        :py:class:`cuda.cccl.cooperative.experimental._typing.DimType`
+        :py:class:`cuda.cooperative._typing.DimType`
 
     :param items_per_thread: Supplies the number of items partitioned onto each
         thread.
@@ -137,7 +137,7 @@ def exchange(
     :raises ValueError: If ``items_per_thread`` is greater than 1 and
         ``methods`` is not *None* (i.e. a user-defined type is being used).
 
-    :returns: An :py:class:`cuda.cccl.cooperative.experimental._types.Invocable`
+    :returns: An :py:class:`cuda.cooperative._types.Invocable`
         object representing the specialized kernel that call be called from
         a Numba JIT'd CUDA kernel.
 

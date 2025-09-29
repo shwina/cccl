@@ -10,7 +10,7 @@ Example showing how to use cache_modified_iterator.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Prepare the input array.
 h_input = np.array([1, 2, 3, 4, 5], dtype=np.int32)

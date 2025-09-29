@@ -9,7 +9,7 @@ TransformOutputIterator example demonstrating reduction with transform output it
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Create input and output arrays
 d_input = cp.array([1, 2, 3, 4, 5.0], dtype=np.float32)

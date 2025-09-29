@@ -5,12 +5,12 @@
 
 import numba
 
-from cuda.cccl.cooperative.experimental._common import (
+from cuda.cooperative._common import (
     make_binary_tempfile,
     normalize_dim_param,
     normalize_dtype_param,
 )
-from cuda.cccl.cooperative.experimental._types import (
+from cuda.cooperative._types import (
     Algorithm,
     Dependency,
     DependentArray,

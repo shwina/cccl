@@ -10,7 +10,7 @@ Example showing how to use segmented_reduce to find the minimum in each segment.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 
 def min_op(a, b):

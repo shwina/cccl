@@ -7,13 +7,13 @@
   Python exposure of cooperative algorithms is in public beta.
   The API is subject to change without notice.
 
-.. automodule:: cuda.cccl.cooperative.experimental.warp
+.. automodule:: cuda.cooperative.warp
   :members:
   :undoc-members:
   :imported-members:
 
 
-.. automodule:: cuda.cccl.cooperative.experimental.block
+.. automodule:: cuda.cooperative.block
   :members:
   :undoc-members:
   :imported-members:

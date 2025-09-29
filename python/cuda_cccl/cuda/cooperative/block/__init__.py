@@ -2,18 +2,18 @@
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-from cuda.cccl.cooperative.experimental.block._block_exchange import (
+from cuda.cooperative.block._block_exchange import (
     BlockExchangeType,
     exchange,
 )
-from cuda.cccl.cooperative.experimental.block._block_load_store import load, store
-from cuda.cccl.cooperative.experimental.block._block_merge_sort import merge_sort_keys
-from cuda.cccl.cooperative.experimental.block._block_radix_sort import (
+from cuda.cooperative.block._block_load_store import load, store
+from cuda.cooperative.block._block_merge_sort import merge_sort_keys
+from cuda.cooperative.block._block_radix_sort import (
     radix_sort_keys,
     radix_sort_keys_descending,
 )
-from cuda.cccl.cooperative.experimental.block._block_reduce import reduce, sum
-from cuda.cccl.cooperative.experimental.block._block_scan import (
+from cuda.cooperative.block._block_reduce import reduce, sum
+from cuda.cooperative.block._block_scan import (
     exclusive_scan,
     exclusive_sum,
     inclusive_scan,

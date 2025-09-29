@@ -17,8 +17,8 @@ from numba.core.typing import signature
 from numba.cuda import LTOIR
 from numba.cuda.cudadrv import driver as cuda_driver
 
-import cuda.cccl.cooperative.experimental._nvrtc as nvrtc
-from cuda.cccl.cooperative.experimental._common import find_unsigned
+import cuda.cooperative._nvrtc as nvrtc
+from cuda.cooperative._common import find_unsigned
 
 NUMBA_TYPES_TO_CPP = {
     types.boolean: "bool",

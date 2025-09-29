@@ -10,7 +10,7 @@ Example showing how to use unique_by_key with the object API.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Unique by key example demonstrating the object API
 dtype = np.int32

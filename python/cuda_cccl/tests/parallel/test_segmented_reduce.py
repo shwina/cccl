@@ -6,7 +6,7 @@ import cupy as cp
 import numpy as np
 import pytest
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 
 @pytest.fixture(params=["i4", "u4", "i8", "u8"])

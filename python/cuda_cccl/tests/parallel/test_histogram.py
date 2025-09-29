@@ -6,7 +6,7 @@ import cupy as cp
 import numpy as np
 import pytest
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 DTYPE_LIST = [
     np.uint8,
@@ -267,7 +267,7 @@ def test_histogram_even():
     import cupy as cp
     import numpy as np
 
-    import cuda.cccl.parallel.experimental as parallel
+    import cuda.parallel as parallel
 
     num_samples = 10
     h_samples = np.array(

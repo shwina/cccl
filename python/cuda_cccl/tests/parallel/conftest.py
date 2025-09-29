@@ -91,10 +91,10 @@ def verify_sass(request, monkeypatch):
     if request.node.get_closest_marker("no_verify_sass"):
         return
 
-    import cuda.cccl.parallel.experimental._cccl_interop
+    import cuda.parallel._cccl_interop
 
     monkeypatch.setattr(
-        cuda.cccl.parallel.experimental._cccl_interop,
+        cuda.parallel._cccl_interop,
         "_check_sass",
         True,
     )

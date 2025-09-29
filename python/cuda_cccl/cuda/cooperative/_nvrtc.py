@@ -5,8 +5,8 @@
 import functools
 
 from cuda.bindings import nvrtc
-from cuda.cccl.cooperative.experimental._caching import disk_cache
-from cuda.cccl.cooperative.experimental._common import check_in, version
+from cuda.cooperative._caching import disk_cache
+from cuda.cooperative._common import check_in, version
 
 
 def CHECK_NVRTC(err, prog):

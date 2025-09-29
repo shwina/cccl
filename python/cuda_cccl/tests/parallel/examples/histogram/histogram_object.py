@@ -10,7 +10,7 @@ Example showing how to use histogram object API to bin a sequence of samples.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Prepare the input and output arrays.
 h_samples = np.array(

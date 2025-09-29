@@ -10,7 +10,7 @@ Example showing how to use zip_iterator to perform elementwise sum of two arrays
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Prepare the input arrays.
 d_input1 = cp.array([1, 2, 3, 4, 5], dtype=np.int32)

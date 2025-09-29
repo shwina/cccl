@@ -2,7 +2,7 @@ import ctypes
 
 import pytest
 
-import cuda.cccl.parallel.experimental._bindings as bindings
+import cuda.parallel._bindings as bindings
 
 
 @pytest.fixture(

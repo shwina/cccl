@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-from cuda.cccl.cooperative.experimental import block, warp
-from cuda.cccl.cooperative.experimental._types import StatefulFunction
+from cuda.cooperative import block, warp
+from cuda.cooperative._types import StatefulFunction
 
 __all__ = ["block", "warp", "StatefulFunction"]

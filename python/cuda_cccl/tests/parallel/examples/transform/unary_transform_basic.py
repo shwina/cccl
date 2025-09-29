@@ -10,7 +10,7 @@ Example showing how to use unary_transform to apply a unary operation to each el
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Prepare the input and output arrays.
 input_data = np.array([1, 2, 3, 4, 5], dtype=np.int32)

@@ -8,7 +8,7 @@ import numba.cuda
 import numpy as np
 import pytest
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 DTYPE_LIST = [
     np.uint8,
@@ -153,10 +153,10 @@ def test_unique_by_key_iterators(dtype, num_items, op, monkeypatch):
     # Skip sass verification for CC 9.0+, due to a bug in NVRTC.
     # TODO: add NVRTC version check, ref nvbug 5243118
     if cc_major >= 9:
-        import cuda.cccl.parallel.experimental._cccl_interop
+        import cuda.parallel._cccl_interop
 
         monkeypatch.setattr(
-            cuda.cccl.parallel.experimental._cccl_interop,
+            cuda.parallel._cccl_interop,
             "_check_sass",
             False,
         )

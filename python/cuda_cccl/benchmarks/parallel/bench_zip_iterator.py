@@ -2,7 +2,7 @@ import cupy as cp
 import numpy as np
 import pytest
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 
 @parallel.gpu_struct

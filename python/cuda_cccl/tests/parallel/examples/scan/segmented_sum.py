@@ -10,7 +10,7 @@ Implement segmented scan using zip iterator and ordinary scan.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Prepare the input data and head flags.
 # Segmented inclusive sum on array of values and head-flags

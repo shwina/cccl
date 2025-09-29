@@ -10,7 +10,7 @@ Computing the minimum value of a sequence using `reduce_into`.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 
 def min_op(a, b):

@@ -10,7 +10,7 @@ Exclusive scan using custom maximum operation.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Define the binary operation for the scan.
 

@@ -7,7 +7,7 @@
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Given input vector u and smoothing parameter 0<alpha<1
 # the exponential moving average sequence ma is defined

@@ -9,7 +9,7 @@ import numba.types
 import numpy as np
 import pytest
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 
 def scan_host(h_input: np.ndarray, op, h_init, force_inclusive):
@@ -46,10 +46,10 @@ def test_scan_array_input(force_inclusive, input_array, monkeypatch):
     # Also skip for CC 9.0+, due to a bug in NVRTC.
     # TODO: add NVRTC version check, ref nvbug 5243118
     if np.issubdtype(input_array.dtype, np.complexfloating) or cc_major >= 9:
-        import cuda.cccl.parallel.experimental._cccl_interop
+        import cuda.parallel._cccl_interop
 
         monkeypatch.setattr(
-            cuda.cccl.parallel.experimental._cccl_interop,
+            cuda.parallel._cccl_interop,
             "_check_sass",
             False,
         )

@@ -218,10 +218,10 @@ Requirements:
 ### Usage Examples
 
 ```python
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 result = parallel.reduce_into(input_array, output_scalar, init_val, binary_op)
 
-import cuda.cccl.cooperative.experimental as cooperative
+import cuda.cooperative as cooperative
 @cuda.jit
 def kernel(data):
     cooperative.block.reduce(data, binary_op)

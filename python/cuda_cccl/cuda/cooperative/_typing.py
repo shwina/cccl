@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     import numba
     import numpy as np
 
-    from cuda.cccl.cooperative.experimental._common import dim3
+    from cuda.cooperative._common import dim3
 
 # Type alias for dimension parameters that can be passed to CUDA functions.
 DimType = Union["dim3", int, Tuple[int, int], Tuple[int, int, int]]

@@ -23,7 +23,7 @@ from helpers import (
 )
 from numba import cuda, types
 
-import cuda.cccl.cooperative.experimental as cudax
+import cuda.cooperative as cudax
 
 numba.config.CUDA_LOW_OCCUPANCY_WARNINGS = 0
 

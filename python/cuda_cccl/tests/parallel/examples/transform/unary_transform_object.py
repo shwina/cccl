@@ -10,7 +10,7 @@ Unary transform examples demonstrating the object API and well-known operations.
 import cupy as cp
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Prepare the input and output arrays.
 dtype = np.int32

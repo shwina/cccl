@@ -13,7 +13,7 @@ import cupy as cp
 import cupyx.scipy.special as cp_special
 import numpy as np
 
-import cuda.cccl.parallel.experimental as parallel
+import cuda.parallel as parallel
 
 # Prepare the input data and compute log-probabilities.
 # Use log-add-exp binary operation to sidestep flush-to-zero
