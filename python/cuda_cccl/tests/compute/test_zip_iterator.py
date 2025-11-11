@@ -239,3 +239,99 @@ def test_zip_iterator_with_scan(num_items):
     for i, result_item in enumerate(result):
         assert result_item["first_min"] == expected_first_running_mins[i]
         assert result_item["second_min"] == expected_second_running_mins[i]
+
+
+def test_nested_zip_iterators():
+    """Test that ZipIterator can be nested inside another ZipIterator.
+
+    This creates a structure like: ZipIterator(ZipIterator(a, b), c)
+    which should produce values with a nested structure.
+    """
+
+    InnerPair = gpu_struct({"first": np.int32, "second": np.int64})
+    OuterTriple = gpu_struct({"inner": InnerPair, "third": np.float32})
+
+    def sum_nested_zips(v1, v2):
+        return OuterTriple(
+            InnerPair(
+                v1.inner.first + v2.inner.first, v1.inner.second + v2.inner.second
+            ),
+            v1.third + v2.third,
+        )
+
+    num_items = 100
+
+    # Create three input arrays
+    d_input_a = cp.arange(num_items, dtype=np.int32)
+    d_input_b = cp.arange(num_items, dtype=np.int64) * 2
+    d_input_c = cp.arange(num_items, dtype=np.float32) * 3.0
+
+    # Create an inner zip iterator combining a and b
+    inner_zip = ZipIterator(d_input_a, d_input_b)
+
+    # Create an outer zip iterator combining inner_zip and c
+    outer_zip = ZipIterator(inner_zip, d_input_c)
+
+    # Perform reduction
+    d_output = cp.empty(1, dtype=OuterTriple.dtype)
+    h_init = OuterTriple(InnerPair(0, 0), 0.0)
+
+    cuda.compute.reduce_into(outer_zip, d_output, sum_nested_zips, num_items, h_init)
+
+    result = d_output.get()[0]
+
+    # Calculate expected values
+    expected_first = d_input_a.sum().get()
+    expected_second = d_input_b.sum().get()
+    expected_third = d_input_c.sum().get()
+
+    assert result["inner"]["first"] == expected_first, (
+        f"Expected inner.first={expected_first}, got {result['inner']['first']}"
+    )
+    assert result["inner"]["second"] == expected_second, (
+        f"Expected inner.second={expected_second}, got {result['inner']['second']}"
+    )
+    assert np.isclose(result["third"], expected_third, rtol=1e-5), (
+        f"Expected third={expected_third}, got {result['third']}"
+    )
+
+
+# Test deeply nested zip iterators
+def test_deeply_nested_zip_iterators():
+    """Test 3 levels of nested zip iterators."""
+    # outer_zip produces a struct like: {value_0: {value_0: int32, value_1: float32}, value_1: int64}
+    # Define matching struct types with our own names
+    InnerPair = gpu_struct({"a": np.int32, "b": np.float32})
+    OuterPair = gpu_struct({"inner": InnerPair, "c": np.int64})
+
+    def sum_nested_zips(v1, v2):
+        return OuterPair(
+            InnerPair(v1.inner.a + v2.inner.a, v1.inner.b + v2.inner.b),
+            v1.c + v2.c,
+        )
+
+    num_items = 100
+
+    d_input_a = cp.arange(num_items, dtype=np.int32)
+    d_input_b = cp.arange(num_items, dtype=np.float32)
+    d_input_c = cp.arange(num_items, dtype=np.int64)
+
+    inner_zip = ZipIterator(d_input_a, d_input_b)
+    outer_zip = ZipIterator(inner_zip, d_input_c)
+
+    d_output = cp.empty(1, dtype=OuterPair.dtype)
+    h_init = OuterPair(InnerPair(0, 0.0), 0)
+
+    cuda.compute.reduce_into(outer_zip, d_output, sum_nested_zips, num_items, h_init)
+
+    result = d_output.get()[0]
+
+    # outer_zip produces: {value_0: {value_0: int32, value_1: float32}, value_1: int64}
+    # which maps to our OuterPair: {inner: {a: int32, b: float32}, c: int64}
+    expected_a = d_input_a.sum().get()  # int32
+    expected_b = d_input_b.sum().get()  # float32
+    expected_c = d_input_c.sum().get()  # int64
+
+    assert result["inner"]["a"] == expected_a
+    assert np.isclose(result["inner"]["b"], expected_b)
+    assert result["c"] == expected_c
