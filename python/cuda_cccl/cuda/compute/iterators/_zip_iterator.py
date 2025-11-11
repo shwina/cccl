@@ -8,10 +8,10 @@ import numba
 from llvmlite import ir  # noqa: F401
 from numba import cuda, types  # noqa: F401
 from numba.core.datamodel.registry import default_manager  # noqa: F401
-from numba.core.extending import intrinsic  # noqa: F401
+from numba.core.extending import as_numba_type, intrinsic  # noqa: F401
 
 from .._utils.protocols import get_dtype
-from ..struct import gpu_struct_from_numba_types
+from ..struct import make_struct_type
 from ._iterators import (
     IteratorBase,
     IteratorKind,
@@ -36,22 +36,18 @@ def _get_zip_iterator_metadata(iterators):
     # this iterator's state is a struct composed of the states of the input iterators:
     state_field_names = tuple(f"state_{i}" for i in range(n_iterators))
     state_field_types = tuple(it.state_type for it in iterators)
-    ZipState = gpu_struct_from_numba_types(
-        "ZipState", state_field_names, state_field_types
-    )
+    ZipState = make_struct_type("ZipState", state_field_names, state_field_types)
 
     # this iterator's value is a struct composed of the values of the input iterators:
     value_field_names = tuple(f"value_{i}" for i in range(n_iterators))
     value_field_types = tuple(it.value_type for it in iterators)
-    ZipValue = gpu_struct_from_numba_types(
-        "ZipValue", value_field_names, value_field_types
-    )
+    ZipValue = make_struct_type("ZipValue", value_field_names, value_field_types)
 
     cvalue = ZipCValueStruct(
         **{f"iter_{i}": it.cvalue for i, it in enumerate(iterators)}
     )
-    state_type = ZipState._numba_type
-    value_type = ZipValue._numba_type
+    state_type = as_numba_type(ZipState)
+    value_type = as_numba_type(ZipValue)
     return cvalue, state_type, value_type
 
 
@@ -63,6 +59,15 @@ def _get_advance_and_dereference_functions(iterators):
     # input iterator.
 
     n_iterators = len(iterators)
+
+    # Create a local namespace for this zip iterator to avoid polluting globals
+    # and prevent name collisions when nesting zip iterators
+    local_ns = {
+        "intrinsic": intrinsic,
+        "types": types,
+        "ir": ir,
+        "default_manager": default_manager,
+    }
 
     # Within the advance and dereference methods of this iterator, we need a way
     # to get pointers to the fields of the state struct (advance and dereference),
@@ -89,14 +94,14 @@ def {func_name}(context, struct_ptr_type):
     return types.CPointer(field_type)(struct_ptr_type), codegen
 """
         # Execute the code to create the intrinsic function in global namespace
-        exec(intrinsic_code, globals())
+        exec(intrinsic_code, local_ns)
 
     # Now we can define the advance and dereference methods of this iterator,
     # which also need to be defined dynamically because they will use the
     # intrinsics defined above.
     for i, it in enumerate(iterators):
-        globals()[f"advance_{i}"] = cuda.jit(it.advance, device=True)
-        globals()[f"dereference_{i}"] = cuda.jit(
+        local_ns[f"advance_{i}"] = cuda.jit(it.advance, device=True)
+        local_ns[f"dereference_{i}"] = cuda.jit(
             it.input_dereference, device=True
         )  # only input_dereference for now
 
@@ -126,12 +131,12 @@ def input_dereference(state, result):
 {chr(10).join(dereference_lines)}
 """  # chr(10) is '\n'
 
-    # Execute the method codes:
-    exec(advance_method_code, globals())
-    exec(dereference_method_code, globals())
+    # Execute the method codes in local namespace:
+    exec(advance_method_code, local_ns)
+    exec(dereference_method_code, local_ns)
 
-    advance_func = globals()["input_advance"]
-    dereference_func = globals()["input_dereference"]
+    advance_func = local_ns["input_advance"]
+    dereference_func = local_ns["input_dereference"]
 
     return advance_func, dereference_func
 
