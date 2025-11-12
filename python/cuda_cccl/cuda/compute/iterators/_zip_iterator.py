@@ -4,13 +4,12 @@
 
 import ctypes
 
-import numba
 from llvmlite import ir  # noqa: F401
 from numba import cuda, types  # noqa: F401
 from numba.core.datamodel.registry import default_manager  # noqa: F401
 from numba.core.extending import as_numba_type, intrinsic  # noqa: F401
 
-from .._utils.protocols import get_dtype
+# from .._utils.protocols import get_dtype
 from ..struct import make_struct_type
 from ._iterators import (
     IteratorBase,
@@ -186,6 +185,8 @@ def make_zip_iterator(*iterators):
     Returns:
         ZipIterator: Iterator that combines all input iterators
     """
+    from .._cccl_interop import get_value_type
+
     if len(iterators) < 1:
         raise ValueError("At least 1 iterator is required")
 
@@ -193,7 +194,7 @@ def make_zip_iterator(*iterators):
     processed_iterators = []
     for it in iterators:
         if hasattr(it, "__cuda_array_interface__"):
-            it = pointer(it, numba.from_dtype(get_dtype(it)))
+            it = pointer(it, get_value_type(it))
         processed_iterators.append(it)
 
     # Validate all are iterators
@@ -231,7 +232,6 @@ def make_zip_iterator(*iterators):
                 state_type=state_type,
                 value_type=value_type,
             )
-            # Override the base class _kind to include underlying iterator kinds
             self._kind = self.__class__.iterator_kind_type(
                 (value_type, *kinds), self.state_type
             )
