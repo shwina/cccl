@@ -380,3 +380,61 @@ def test_output_zip_iterator_with_scan(monkeypatch, num_items):
 
     np.testing.assert_array_equal(d_out1.get(), expected_out1)
     np.testing.assert_array_equal(d_out2.get(), expected_out2)
+
+
+@pytest.mark.parametrize("num_items", [10, 1000])
+def test_output_zip_iterator_with_structs(monkeypatch, num_items):
+    """Test ZipIterator as output iterator with scan operations returning structs."""
+
+    cc_major, _ = numba.cuda.get_current_device().compute_capability
+    if cc_major >= 8:
+        monkeypatch.setattr(
+            cuda.compute._cccl_interop,
+            "_check_sass",
+            False,
+        )
+
+    Vec2 = gpu_struct({"x": np.float32, "y": np.float32})
+
+    h_in1 = np.zeros(num_items, dtype=Vec2.dtype)
+    h_in2 = np.zeros(num_items, dtype=Vec2.dtype)
+    for i in range(num_items):
+        h_in1[i]["x"] = float(i)
+        h_in1[i]["y"] = float(i * 2)
+        h_in2[i]["x"] = float(i * 10)
+        h_in2[i]["y"] = float(i * 20)
+
+    d_in1 = cp.empty(num_items, dtype=Vec2.dtype)
+    d_in2 = cp.empty(num_items, dtype=Vec2.dtype)
+    d_in1.set(h_in1)
+    d_in2.set(h_in2)
+
+    zip_it = ZipIterator(d_in1, d_in2)
+
+    d_out1 = cp.empty_like(d_in1)
+    d_out2 = cp.empty_like(d_in2)
+
+    zip_out_it = ZipIterator(d_out1, d_out2)
+
+    def add_vec2_pairs(v1, v2):
+        result1 = (v1[0].x + v2[0].x, v1[0].y + v2[0].y)
+        result2 = (v1[1].x + v2[1].x, v1[1].y + v2[1].y)
+        return Vec2(result1[0], result1[1]), Vec2(result2[0], result2[1])
+
+    cuda.compute.inclusive_scan(zip_it, zip_out_it, add_vec2_pairs, None, num_items)
+
+    in1 = d_in1.get()
+    in2 = d_in2.get()
+    expected_out1 = np.empty_like(in1)
+    expected_out2 = np.empty_like(in2)
+
+    expected_out1[0] = in1[0]
+    expected_out2[0] = in2[0]
+    for i in range(1, num_items):
+        expected_out1[i]["x"] = expected_out1[i - 1]["x"] + in1[i]["x"]
+        expected_out1[i]["y"] = expected_out1[i - 1]["y"] + in1[i]["y"]
+        expected_out2[i]["x"] = expected_out2[i - 1]["x"] + in2[i]["x"]
+        expected_out2[i]["y"] = expected_out2[i - 1]["y"] + in2[i]["y"]
+
+    np.testing.assert_array_equal(d_out1.get(), expected_out1)
+    np.testing.assert_array_equal(d_out2.get(), expected_out2)
