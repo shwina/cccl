@@ -43,7 +43,7 @@ from .iterators import (
     TransformOutputIterator,
     ZipIterator,
 )
-from .op import OpKind
+from .op import OpKind, StatefulOp
 from .struct import gpu_struct
 
 __all__ = [
@@ -80,6 +80,7 @@ __all__ = [
     "segmented_reduce",
     "segmented_sort",
     "SortOrder",
+    "StatefulOp",
     "TransformIterator",
     "TransformOutputIterator",
     "three_way_partition",

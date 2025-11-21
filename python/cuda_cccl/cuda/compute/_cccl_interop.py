@@ -419,6 +419,85 @@ def _create_output_dereference_wrapper(deref_fn, state_ptr_type, value_type):
     return wrapper_func, void_sig
 
 
+def _create_stateful_void_ptr_wrapper(op, sig, state_ptr_type):
+    """Creates a wrapper function for a stateful operator.
+
+    The wrapper takes state as the first void* argument, followed by input arguments,
+    and the result pointer as the last argument. The signature is:
+    void(void* state, void* arg1, ..., void* argN, void* result)
+
+    Args:
+        op: The user's callable operator
+        sig: The signature of the operator (state_ptr_type, input_types...) -> return_type
+        state_ptr_type: The numba pointer type for the state (CPointer)
+    """
+    # Generate argument names: state + inputs + result
+    # -1 because first arg is state
+    input_args = [f"arg_{i}" for i in range(len(sig.args) - 1)]
+    all_args = ["state_ptr"] + input_args + ["ret"]
+    arg_str = ", ".join(all_args)
+    void_sig = types.void(*(types.voidptr for _ in all_args))
+
+    # Create the wrapper function source code
+    wrapper_src = textwrap.dedent(f"""
+    @intrinsic
+    def impl(typingctx, {arg_str}):
+        def codegen(context, builder, impl_sig, args):
+            # Get LLVM types
+            state_llvm_type = context.get_value_type(state_ptr_type)
+            arg_types = [context.get_value_type(t) for t in sig.args[1:]]  # Skip state in args
+            ret_type = context.get_value_type(sig.return_type)
+
+            # The state argument points to op_state.data which contains the device pointer
+            # We need to load the actual pointer from that location
+            # First cast args[0] to a pointer-to-pointer type
+            ptr_to_ptr_type = state_llvm_type.as_pointer()
+            state_ptr_ptr = builder.bitcast(args[0], ptr_to_ptr_type)
+
+            # Load the actual device pointer from the op_state.data
+            state_typed_ptr = builder.load(state_ptr_ptr)
+
+            # Bitcast input pointers and load values
+            input_ptrs = [builder.bitcast(p, t.as_pointer())
+                         for p, t in zip(args[1:-1], arg_types)]
+            input_vals = [builder.load(p) for p in input_ptrs]
+
+            # Bitcast result pointer
+            ret_ptr = builder.bitcast(args[-1], ret_type.as_pointer())
+
+            # Call the original operator with state pointer + inputs
+            all_vals = [state_typed_ptr] + input_vals
+            cres = context.compile_subroutine(builder, op, sig, caching=False)
+            result = context.call_internal(builder, cres.fndesc, sig, all_vals)
+
+            # Store the result
+            builder.store(result, ret_ptr)
+
+            return context.get_dummy_value()
+        return void_sig, codegen
+
+    # intrinsics cannot directly be compiled by numba, so we make a trivial wrapper:
+    def wrapped_{op.__name__}({arg_str}):
+        return impl({arg_str})
+    """)
+
+    # Create namespace and compile the wrapper
+    local_dict = {
+        "types": types,
+        "sig": sig,
+        "state_ptr_type": state_ptr_type,
+        "op": op,
+        "intrinsic": intrinsic,
+        "void_sig": void_sig,
+    }
+    exec(wrapper_src, globals(), local_dict)
+
+    wrapper_func = local_dict[f"wrapped_{op.__name__}"]
+    wrapper_func.__globals__.update(local_dict)
+
+    return wrapper_func, void_sig
+
+
 def to_cccl_op(op: Callable | OpKind, sig: Signature | None) -> Op:
     """Return an `Op` object corresponding to the given callable or well-known operation.
 
@@ -439,6 +518,58 @@ def to_cccl_op(op: Callable | OpKind, sig: Signature | None) -> Op:
             ltoir=b"",
             state_alignment=1,
             state=b"",
+        )
+
+    # Check if op is a StatefulOp
+    from .op import StatefulOp
+
+    if isinstance(op, StatefulOp):
+        state_array = op.state
+        func = op.func
+
+        # Get state type information
+        state_dtype = get_dtype(state_array)
+        state_numba_dtype = numba.from_dtype(state_dtype)
+
+        # Get state memory as bytes
+        if not is_contiguous(state_array):
+            raise ValueError("StatefulOp state array must be contiguous")
+
+        # Get state pointer - following the iterator pattern
+        state_ptr = get_data_pointer(state_array)
+
+        # Calculate alignment
+        context = cuda.descriptor.cuda_target.target_context
+        state_llvm_type = context.get_value_type(state_numba_dtype)
+        state_alignment = state_llvm_type.get_abi_alignment(context.target_data)
+
+        # State is passed as a pointer (like RawPointer does)
+        # This allows the user function to dereference and use atomic operations on global memory
+        state_ptr_type = types.CPointer(state_numba_dtype)
+
+        # Create wrapper with state as first parameter (pointer type)
+        wrapped_op, wrapper_sig = _create_stateful_void_ptr_wrapper(
+            func, sig, state_ptr_type
+        )
+
+        ltoir, _ = cuda.compile(wrapped_op, sig=wrapper_sig, output="ltoir")
+
+        # Create state using IteratorState pattern - wrap the device pointer
+        # This properly handles device memory without trying to read it from host
+        import ctypes
+
+        state_cvalue = ctypes.c_void_p(state_ptr)
+        state_wrapper = IteratorState(state_cvalue)
+
+        # Convert IteratorState to bytes via memoryview
+        state_bytes = bytes(memoryview(state_wrapper))
+
+        return Op(
+            operator_type=OpKind.STATEFUL,
+            name=wrapped_op.__name__,
+            ltoir=ltoir,
+            state_alignment=state_alignment,
+            state=state_bytes,
         )
 
     # op is a callable:

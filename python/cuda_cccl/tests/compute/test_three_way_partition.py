@@ -7,7 +7,12 @@ import numpy as np
 import pytest
 
 import cuda.compute
-from cuda.compute import CacheModifiedInputIterator, gpu_struct
+from cuda.compute import (
+    CacheModifiedInputIterator,
+    DiscardIterator,
+    ZipIterator,
+    gpu_struct,
+)
 
 DTYPE_LIST = [
     np.uint8,
@@ -373,3 +378,167 @@ def test_three_way_partition_all_selected_first():
     np.testing.assert_array_equal(got_first, h_in)
     np.testing.assert_array_equal(got_second, np.empty(0, dtype=dtype))
     np.testing.assert_array_equal(got_unselected, np.empty(0, dtype=dtype))
+
+
+def test_three_way_partition_with_zip_iterators():
+    """Test three way partition with ZipIterator for both input and output."""
+    dtype = np.int32
+    num_items = 10_000
+
+    # Create two arrays
+    h_in1 = random_array(num_items, dtype, max_value=100)
+    h_in2 = random_array(num_items, dtype, max_value=100)
+
+    # Predicates that work on tuples
+    def less_than_op(pair):
+        return (pair[0] + pair[1]) < 70
+
+    def greater_equal_op(pair):
+        return (pair[0] + pair[1]) >= 130
+
+    # Device arrays
+    d_in1 = cp.asarray(h_in1)
+    d_in2 = cp.asarray(h_in2)
+
+    # Create zip iterator for input
+    zip_in = ZipIterator(d_in1, d_in2)
+
+    # Allocate output arrays
+    d_first1 = cp.empty_like(d_in1)
+    d_first2 = cp.empty_like(d_in2)
+    d_second1 = cp.empty_like(d_in1)
+    d_second2 = cp.empty_like(d_in2)
+    d_unselected1 = cp.empty_like(d_in1)
+    d_unselected2 = cp.empty_like(d_in2)
+
+    # Create zip iterators for outputs
+    zip_first = ZipIterator(d_first1, d_first2)
+    zip_second = ZipIterator(d_second1, d_second2)
+    zip_unselected = ZipIterator(d_unselected1, d_unselected2)
+
+    d_num_selected = cp.empty(2, dtype=np.int64)
+
+    cuda.compute.three_way_partition(
+        zip_in,
+        zip_first,
+        zip_second,
+        zip_unselected,
+        d_num_selected,
+        less_than_op,
+        greater_equal_op,
+        num_items,
+    )
+
+    num_selected = d_num_selected.get()
+    num_first = int(num_selected[0])
+    num_second = int(num_selected[1])
+    num_unselected = int(num_items) - num_first - num_second
+
+    # Get results
+    got_first1 = d_first1.get()[:num_first]
+    got_first2 = d_first2.get()[:num_first]
+    got_second1 = d_second1.get()[:num_second]
+    got_second2 = d_second2.get()[:num_second]
+    got_unselected1 = d_unselected1.get()[:num_unselected]
+    got_unselected2 = d_unselected2.get()[:num_unselected]
+
+    # Verify results: check predicates on output
+    # All elements in first partition should satisfy less_than_op
+    for i in range(num_first):
+        assert (got_first1[i] + got_first2[i]) < 70
+
+    # All elements in second partition should satisfy greater_equal_op
+    for i in range(num_second):
+        assert (got_second1[i] + got_second2[i]) >= 130
+
+    # All elements in unselected should satisfy neither predicate
+    for i in range(num_unselected):
+        sum_val = got_unselected1[i] + got_unselected2[i]
+        assert sum_val >= 70 and sum_val < 130
+
+    # Verify counts
+    h_sums = h_in1 + h_in2
+    expected_first_count = np.sum(h_sums < 70)
+    remaining_sums = h_sums[h_sums >= 70]
+    expected_second_count = np.sum(remaining_sums >= 130)
+
+    assert num_first == expected_first_count
+    assert num_second == expected_second_count
+
+
+def test_three_way_partition_zip_input_discard_unselected():
+    """Test three way partition with ZipIterator input and DiscardIterator for unselected."""
+    dtype = np.int32
+    num_items = 10_000
+
+    # Create two arrays
+    h_in1 = random_array(num_items, dtype, max_value=100)
+    h_in2 = random_array(num_items, dtype, max_value=100)
+
+    # Predicates that work on tuples
+    def less_than_op(pair):
+        return (pair[0] + pair[1]) < 70
+
+    def greater_equal_op(pair):
+        return (pair[0] + pair[1]) >= 130
+
+    # Device arrays
+    d_in1 = cp.asarray(h_in1)
+    d_in2 = cp.asarray(h_in2)
+
+    # Create zip iterator for input
+    zip_in = ZipIterator(d_in1, d_in2)
+
+    # Allocate output arrays for first and second partitions
+    d_first1 = cp.empty_like(d_in1)
+    d_first2 = cp.empty_like(d_in2)
+    d_second1 = cp.empty_like(d_in1)
+    d_second2 = cp.empty_like(d_in2)
+
+    # Create zip iterators for first and second outputs
+    zip_first = ZipIterator(d_first1, d_first2)
+    zip_second = ZipIterator(d_second1, d_second2)
+
+    # Use DiscardIterator for unselected, matching the type of the input
+    discard_unselected = DiscardIterator(zip_in)
+
+    d_num_selected = cp.empty(2, dtype=np.int64)
+
+    cuda.compute.three_way_partition(
+        zip_in,
+        zip_first,
+        zip_second,
+        discard_unselected,
+        d_num_selected,
+        less_than_op,
+        greater_equal_op,
+        num_items,
+    )
+
+    num_selected = d_num_selected.get()
+    num_first = int(num_selected[0])
+    num_second = int(num_selected[1])
+
+    # Get results (unselected are discarded, so we don't check them)
+    got_first1 = d_first1.get()[:num_first]
+    got_first2 = d_first2.get()[:num_first]
+    got_second1 = d_second1.get()[:num_second]
+    got_second2 = d_second2.get()[:num_second]
+
+    # Verify results: check predicates on output
+    # All elements in first partition should satisfy less_than_op
+    for i in range(num_first):
+        assert (got_first1[i] + got_first2[i]) < 70
+
+    # All elements in second partition should satisfy greater_equal_op
+    for i in range(num_second):
+        assert (got_second1[i] + got_second2[i]) >= 130
+
+    # Verify counts
+    h_sums = h_in1 + h_in2
+    expected_first_count = np.sum(h_sums < 70)
+    remaining_sums = h_sums[h_sums >= 70]
+    expected_second_count = np.sum(remaining_sums >= 130)
+
+    assert num_first == expected_first_count
+    assert num_second == expected_second_count

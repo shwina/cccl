@@ -26,6 +26,8 @@ def make_cache_key(
     select_first_part_op: Callable,
     select_second_part_op: Callable,
 ):
+    from ..op import StatefulOp
+
     d_in_key = (
         d_in.kind if isinstance(d_in, IteratorBase) else protocols.get_dtype(d_in)
     )
@@ -49,8 +51,26 @@ def make_cache_key(
         if isinstance(d_num_selected_out, IteratorBase)
         else protocols.get_dtype(d_num_selected_out)
     )
-    select_first_part_op_key = CachableFunction(select_first_part_op)
-    select_second_part_op_key = CachableFunction(select_second_part_op)
+
+    # For StatefulOp, include both the function and state dtype in cache key
+    if isinstance(select_first_part_op, StatefulOp):
+        select_first_part_op_key = (
+            CachableFunction(select_first_part_op.func),
+            protocols.get_dtype(select_first_part_op.state),
+            select_first_part_op.state.size,
+        )
+    else:
+        select_first_part_op_key = CachableFunction(select_first_part_op)
+
+    if isinstance(select_second_part_op, StatefulOp):
+        select_second_part_op_key = (
+            CachableFunction(select_second_part_op.func),
+            protocols.get_dtype(select_second_part_op.state),
+            select_second_part_op.state.size,
+        )
+    else:
+        select_second_part_op_key = CachableFunction(select_second_part_op)
+
     return (
         d_in_key,
         d_first_part_out_key,
@@ -90,12 +110,36 @@ class _ThreeWayPartition:
         self.d_unselected_out_cccl = cccl.to_cccl_output_iter(d_unselected_out)
         self.d_num_selected_out_cccl = cccl.to_cccl_output_iter(d_num_selected_out)
 
+        from ..op import StatefulOp
+
         value_type = cccl.get_value_type(d_in)
-        sig = numba.types.uint8(value_type)
+
+        # For stateful ops, signature includes state pointer as first parameter
+        # (like RawPointer - pass pointer to global memory, not array value)
+        # For stateless ops, signature is just the value type
+        if isinstance(select_first_part_op, StatefulOp):
+            state_dtype = protocols.get_dtype(select_first_part_op.state)
+            state_numba_dtype = numba.from_dtype(state_dtype)
+            state_ptr_type = numba.types.CPointer(state_numba_dtype)
+            sig_first = numba.types.uint8(state_ptr_type, value_type)
+        else:
+            sig_first = numba.types.uint8(value_type)
+
+        if isinstance(select_second_part_op, StatefulOp):
+            state_dtype = protocols.get_dtype(select_second_part_op.state)
+            state_numba_dtype = numba.from_dtype(state_dtype)
+            state_ptr_type = numba.types.CPointer(state_numba_dtype)
+            sig_second = numba.types.uint8(state_ptr_type, value_type)
+        else:
+            sig_second = numba.types.uint8(value_type)
 
         # There are no well-known operations that can be used with three_way_partition
-        self.select_first_part_op_wrapper = cccl.to_cccl_op(select_first_part_op, sig)
-        self.select_second_part_op_wrapper = cccl.to_cccl_op(select_second_part_op, sig)
+        self.select_first_part_op_wrapper = cccl.to_cccl_op(
+            select_first_part_op, sig_first
+        )
+        self.select_second_part_op_wrapper = cccl.to_cccl_op(
+            select_second_part_op, sig_second
+        )
 
         self.build_result = call_build(
             _bindings.DeviceThreeWayPartitionBuildResult,
