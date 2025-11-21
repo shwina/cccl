@@ -601,9 +601,19 @@ def make_transform_iterator(it, op: Callable, io_kind: str):
             state_type = it.state_type
 
             if io_kind == "input":
-                value_type = get_inferred_return_type(op.py_func, (underlying_it_type,))
+                try:
+                    value_type = signature_from_annotations(op.py_func).args[0]
+                except ValueError:
+                    value_type = get_inferred_return_type(
+                        op.py_func, (underlying_it_type,)
+                    )
             else:
-                value_type = signature_from_annotations(op.py_func).args[0]
+                try:
+                    value_type = signature_from_annotations(op.py_func).args[0]
+                except ValueError:
+                    value_type = get_inferred_return_type(
+                        op.py_func, (underlying_it_type,)
+                    )
 
             super().__init__(
                 cvalue=it.cvalue,
