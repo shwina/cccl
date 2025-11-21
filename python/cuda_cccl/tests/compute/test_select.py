@@ -272,7 +272,7 @@ def test_select_with_iterator(dtype):
         return x < 50
 
     d_in = cp.asarray(h_in)
-    d_in_iter = CacheModifiedInputIterator(d_in)
+    d_in_iter = CacheModifiedInputIterator(d_in, "stream")
     d_out = cp.empty_like(d_in)
     d_num_selected = cp.empty(2, dtype=np.uint64)
 
@@ -403,7 +403,7 @@ def test_select_with_struct(dtype):
     h_x = random_array(num_items, dtype, max_value=100)
     h_y = random_array(num_items, dtype, max_value=100)
 
-    h_in = np.empty(num_items, dtype=Point.struct_type)
+    h_in = np.empty(num_items, dtype=Point.dtype)
     h_in["x"] = h_x
     h_in["y"] = h_y
 

@@ -230,6 +230,11 @@ def _create_void_ptr_wrapper(op, sig):
     arg_str = ", ".join(all_args)
     void_sig = types.void(*(types.voidptr for _ in all_args))
 
+    # Create unique wrapper name to avoid symbol collisions when multiple tests
+    # use functions with the same name (e.g., always_false)
+    unique_suffix = hex(id(op))[2:]
+    wrapper_name = f"wrapped_{op.__name__}_{unique_suffix}"
+
     # Create the wrapper function source code
     wrapper_src = textwrap.dedent(f"""
     @intrinsic
@@ -260,7 +265,7 @@ def _create_void_ptr_wrapper(op, sig):
         return void_sig, codegen
 
     # intrinsics cannot directly be compiled by numba, so we make a trivial wrapper:
-    def wrapped_{op.__name__}({arg_str}):
+    def {wrapper_name}({arg_str}):
         return impl({arg_str})
     """)
 
@@ -274,7 +279,7 @@ def _create_void_ptr_wrapper(op, sig):
     }
     exec(wrapper_src, globals(), local_dict)
 
-    wrapper_func = local_dict[f"wrapped_{op.__name__}"]
+    wrapper_func = local_dict[wrapper_name]
     wrapper_func.__globals__.update(local_dict)
 
     return wrapper_func, void_sig
@@ -288,6 +293,10 @@ def _create_advance_wrapper(advance_fn, state_ptr_type):
     - offset pointer (points to uint64 value)
     """
     void_sig = types.void(types.voidptr, types.voidptr)
+
+    # Create unique wrapper name to avoid symbol collisions
+    unique_suffix = hex(id(advance_fn))[2:]
+    wrapper_name = f"wrapped_{advance_fn.__name__}_{unique_suffix}"
 
     wrapper_src = textwrap.dedent(f"""
     @intrinsic
@@ -307,7 +316,7 @@ def _create_advance_wrapper(advance_fn, state_ptr_type):
             return context.get_dummy_value()
         return void_sig, codegen
 
-    def wrapped_{advance_fn.__name__}(state_arg, offset_arg):
+    def {wrapper_name}(state_arg, offset_arg):
         return impl(state_arg, offset_arg)
     """)
 
@@ -320,7 +329,7 @@ def _create_advance_wrapper(advance_fn, state_ptr_type):
     }
     exec(wrapper_src, globals(), local_dict)
 
-    wrapper_func = local_dict[f"wrapped_{advance_fn.__name__}"]
+    wrapper_func = local_dict[wrapper_name]
     wrapper_func.__globals__.update(local_dict)
 
     return wrapper_func, void_sig
@@ -334,6 +343,10 @@ def _create_input_dereference_wrapper(deref_fn, state_ptr_type, value_type):
     - result pointer
     """
     void_sig = types.void(types.voidptr, types.voidptr)
+
+    # Create unique wrapper name to avoid symbol collisions
+    unique_suffix = hex(id(deref_fn))[2:]
+    wrapper_name = f"wrapped_{deref_fn.__name__}_{unique_suffix}"
 
     wrapper_src = textwrap.dedent(f"""
     @intrinsic
@@ -352,7 +365,7 @@ def _create_input_dereference_wrapper(deref_fn, state_ptr_type, value_type):
             return context.get_dummy_value()
         return void_sig, codegen
 
-    def wrapped_{deref_fn.__name__}(state_arg, result_arg):
+    def {wrapper_name}(state_arg, result_arg):
         return impl(state_arg, result_arg)
     """)
 
@@ -366,7 +379,7 @@ def _create_input_dereference_wrapper(deref_fn, state_ptr_type, value_type):
     }
     exec(wrapper_src, globals(), local_dict)
 
-    wrapper_func = local_dict[f"wrapped_{deref_fn.__name__}"]
+    wrapper_func = local_dict[wrapper_name]
     wrapper_func.__globals__.update(local_dict)
 
     return wrapper_func, void_sig
@@ -380,6 +393,10 @@ def _create_output_dereference_wrapper(deref_fn, state_ptr_type, value_type):
     - value pointer (points to value)
     """
     void_sig = types.void(types.voidptr, types.voidptr)
+
+    # Create unique wrapper name to avoid symbol collisions
+    unique_suffix = hex(id(deref_fn))[2:]
+    wrapper_name = f"wrapped_{deref_fn.__name__}_{unique_suffix}"
 
     wrapper_src = textwrap.dedent(f"""
     @intrinsic
@@ -399,7 +416,7 @@ def _create_output_dereference_wrapper(deref_fn, state_ptr_type, value_type):
             return context.get_dummy_value()
         return void_sig, codegen
 
-    def wrapped_{deref_fn.__name__}(state_arg, value_arg):
+    def {wrapper_name}(state_arg, value_arg):
         return impl(state_arg, value_arg)
     """)
 
@@ -413,7 +430,7 @@ def _create_output_dereference_wrapper(deref_fn, state_ptr_type, value_type):
     }
     exec(wrapper_src, globals(), local_dict)
 
-    wrapper_func = local_dict[f"wrapped_{deref_fn.__name__}"]
+    wrapper_func = local_dict[wrapper_name]
     wrapper_func.__globals__.update(local_dict)
 
     return wrapper_func, void_sig
@@ -437,6 +454,11 @@ def _create_stateful_void_ptr_wrapper(op, sig, state_ptr_type):
     all_args = ["state_ptr"] + input_args + ["ret"]
     arg_str = ", ".join(all_args)
     void_sig = types.void(*(types.voidptr for _ in all_args))
+
+    # Create unique wrapper name to avoid symbol collisions when multiple tests
+    # use functions with the same name (e.g., always_false)
+    unique_suffix = hex(id(op))[2:]
+    wrapper_name = f"wrapped_{op.__name__}_{unique_suffix}"
 
     # Create the wrapper function source code
     wrapper_src = textwrap.dedent(f"""
@@ -477,7 +499,7 @@ def _create_stateful_void_ptr_wrapper(op, sig, state_ptr_type):
         return void_sig, codegen
 
     # intrinsics cannot directly be compiled by numba, so we make a trivial wrapper:
-    def wrapped_{op.__name__}({arg_str}):
+    def {wrapper_name}({arg_str}):
         return impl({arg_str})
     """)
 
@@ -492,7 +514,7 @@ def _create_stateful_void_ptr_wrapper(op, sig, state_ptr_type):
     }
     exec(wrapper_src, globals(), local_dict)
 
-    wrapper_func = local_dict[f"wrapped_{op.__name__}"]
+    wrapper_func = local_dict[wrapper_name]
     wrapper_func.__globals__.update(local_dict)
 
     return wrapper_func, void_sig
