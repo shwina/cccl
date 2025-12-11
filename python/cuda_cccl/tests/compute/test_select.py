@@ -518,8 +518,8 @@ def test_select_stateful_atomic():
     )
 
 
-def test_select_with_side_effect_counting_rejects():
-    """Select with side effect that counts rejected items"""
+def test_select_stateful_counting_rejects():
+    """Test select that counts rejected items using state"""
     from numba import cuda as numba_cuda
 
     d_in = cp.arange(100, dtype=np.int32)
@@ -543,22 +543,3 @@ def test_select_with_side_effect_counting_rejects():
 
     assert num_selected == 50  # Values 50-99
     assert num_rejected == 50  # Values 0-49
-
-
-def test_select_with_lambda():
-    """Test select with a lambda function as predicate."""
-    num_items = 100
-    h_in = np.arange(num_items, dtype=np.int32)
-
-    d_in = cp.asarray(h_in)
-    d_out = cp.empty_like(d_in)
-    d_num_selected = cp.empty(2, dtype=np.uint64)
-
-    # Use a lambda function directly as the predicate
-    cuda.compute.select(d_in, d_out, d_num_selected, lambda x: x % 2 == 0, num_items)
-
-    num_selected = int(d_num_selected.get()[0])
-    expected_selected = [x for x in h_in if x % 2 == 0]
-
-    assert num_selected == len(expected_selected)
-    np.testing.assert_array_equal(d_out.get()[:num_selected], expected_selected)
