@@ -21,6 +21,9 @@ from .typing import DeviceArrayLike, GpuStruct
 # from a value of that type.
 _KEY_FUNCTIONS: dict[type, Callable[[Any], Hashable]] = {}
 
+# Central registry of all algorithm caches
+_cache_registry: dict[str, object] = {}
+
 
 def _key_for(value: Any) -> Hashable:
     """
@@ -75,10 +78,6 @@ def _make_cache_key_from_args(*args, **kwargs) -> tuple:
         return positional_keys + (kwarg_keys,)
 
     return positional_keys
-
-
-# Central registry of all algorithm caches
-_cache_registry: dict[str, object] = {}
 
 
 class _CacheWithRegisteredKeyFunctions:
