@@ -75,15 +75,11 @@ def compile_cpp_to_ltoir(program_cls, source: str, arch: str) -> bytes:
     return obj_code.code
 
 
-@pytest.mark.skipif(
-    not pytest.importorskip("numba.cuda").is_available(),
-    reason="CUDA not available",
-)
 def test_raw_op_with_cuda_core_binary_add(cuda_core_program):
     """Test RawOp with a C++ binary add function compiled via cuda.core."""
-    from numba import cuda as numba_cuda
+    import cupy as cp
 
-    import cuda.compute as cc
+    from cuda.compute import RawOp, int32, reduce_into
 
     arch = get_current_device_arch()
 
@@ -102,34 +98,30 @@ def test_raw_op_with_cuda_core_binary_add(cuda_core_program):
     assert len(ltoir) > 0, "LTOIR compilation failed"
 
     # Create RawOp from the LTOIR
-    add_op = cc.RawOp(
+    add_op = RawOp(
         ltoir=ltoir,
         name="my_add",
-        arg_types=(cc.int32, cc.int32),
-        return_type=cc.int32,
+        arg_types=(int32, int32),
+        return_type=int32,
     )
 
     # Test with reduce_into
-    d_in = numba_cuda.to_device(np.array([1, 2, 3, 4, 5], dtype=np.int32))
-    d_out = numba_cuda.to_device(np.array([0], dtype=np.int32))
+    d_in = cp.array([1, 2, 3, 4, 5], dtype=cp.int32)
+    d_out = cp.array([0], dtype=cp.int32)
     h_init = np.array([0], dtype=np.int32)
 
-    cc.reduce_into(d_in, d_out, add_op, len(d_in), h_init)
+    reduce_into(d_in, d_out, add_op, len(d_in), h_init)
 
-    result = d_out.copy_to_host()[0]
+    result = d_out.get()[0]
     expected = 1 + 2 + 3 + 4 + 5
     assert result == expected, f"Expected {expected}, got {result}"
 
 
-@pytest.mark.skipif(
-    not pytest.importorskip("numba.cuda").is_available(),
-    reason="CUDA not available",
-)
 def test_raw_op_with_cuda_core_max(cuda_core_program):
     """Test RawOp with a C++ max function compiled via cuda.core."""
-    from numba import cuda as numba_cuda
+    import cupy as cp
 
-    import cuda.compute as cc
+    from cuda.compute import RawOp, float32, reduce_into
 
     arch = get_current_device_arch()
 
@@ -146,35 +138,30 @@ def test_raw_op_with_cuda_core_max(cuda_core_program):
     ltoir = compile_cpp_to_ltoir(cuda_core_program, cpp_source, arch)
 
     # Create RawOp from the LTOIR
-    max_op = cc.RawOp(
+    max_op = RawOp(
         ltoir=ltoir,
         name="my_max",
-        arg_types=(cc.float32, cc.float32),
-        return_type=cc.float32,
+        arg_types=(float32, float32),
+        return_type=float32,
     )
 
     # Test with reduce_into
-    input_data = np.array([3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0], dtype=np.float32)
-    d_in = numba_cuda.to_device(input_data)
-    d_out = numba_cuda.to_device(np.array([0.0], dtype=np.float32))
+    d_in = cp.array([3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0], dtype=cp.float32)
+    d_out = cp.array([0.0], dtype=cp.float32)
     h_init = np.array([float("-inf")], dtype=np.float32)
 
-    cc.reduce_into(d_in, d_out, max_op, len(d_in), h_init)
+    reduce_into(d_in, d_out, max_op, len(d_in), h_init)
 
-    result = d_out.copy_to_host()[0]
+    result = d_out.get()[0]
     expected = 9.0
     assert result == expected, f"Expected {expected}, got {result}"
 
 
-@pytest.mark.skipif(
-    not pytest.importorskip("numba.cuda").is_available(),
-    reason="CUDA not available",
-)
 def test_raw_op_with_cuda_core_transform(cuda_core_program):
     """Test RawOp with a C++ unary transform function."""
-    from numba import cuda as numba_cuda
+    import cupy as cp
 
-    import cuda.compute as cc
+    from cuda.compute import RawOp, float64, unary_transform
 
     arch = get_current_device_arch()
 
@@ -190,21 +177,21 @@ def test_raw_op_with_cuda_core_transform(cuda_core_program):
     ltoir = compile_cpp_to_ltoir(cuda_core_program, cpp_source, arch)
 
     # Create RawOp from the LTOIR
-    square_op = cc.RawOp(
+    square_op = RawOp(
         ltoir=ltoir,
         name="my_square",
-        arg_types=(cc.float64,),
-        return_type=cc.float64,
+        arg_types=(float64,),
+        return_type=float64,
     )
 
     # Test with unary_transform
     input_data = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float64)
-    d_in = numba_cuda.to_device(input_data)
-    d_out = numba_cuda.to_device(np.zeros(5, dtype=np.float64))
+    d_in = cp.asarray(input_data)
+    d_out = cp.zeros(5, dtype=cp.float64)
 
-    cc.unary_transform(d_in, d_out, square_op, len(d_in))
+    unary_transform(d_in, d_out, square_op, len(d_in))
 
-    result = d_out.copy_to_host()
+    result = d_out.get()
     expected = input_data**2
     np.testing.assert_array_almost_equal(result, expected)
 
@@ -214,15 +201,11 @@ def test_raw_op_with_cuda_core_transform(cuda_core_program):
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    not pytest.importorskip("numba.cuda").is_available(),
-    reason="CUDA not available",
-)
 def test_raw_iterator_counting_with_cuda_core(cuda_core_program):
     """Test RawIterator implementing a counting iterator via cuda.core C++."""
-    from numba import cuda as numba_cuda
+    import cupy as cp
 
-    import cuda.compute as cc
+    from cuda.compute import OpKind, RawIterator, int64, reduce_into
 
     arch = get_current_device_arch()
 
@@ -256,35 +239,31 @@ def test_raw_iterator_counting_with_cuda_core(cuda_core_program):
     state = start_value.tobytes()
 
     # Create RawIterator
-    counting_iter = cc.RawIterator(
+    counting_iter = RawIterator(
         state=state,
         state_alignment=8,
-        value_type=cc.int64,
+        value_type=int64,
         advance=("counting_advance", advance_ltoir),
         input_dereference=("counting_deref", deref_ltoir),
     )
 
     # Test with reduce_into to sum counting values
     # This should sum: 10 + 11 + 12 + 13 + 14 = 60
-    d_out = numba_cuda.to_device(np.array([0], dtype=np.int64))
+    d_out = cp.array([0], dtype=cp.int64)
     h_init = np.array([0], dtype=np.int64)
 
-    cc.reduce_into(counting_iter, d_out, cc.OpKind.PLUS, 5, h_init)
+    reduce_into(counting_iter, d_out, OpKind.PLUS, 5, h_init)
 
-    result = d_out.copy_to_host()[0]
+    result = d_out.get()[0]
     expected = 10 + 11 + 12 + 13 + 14
     assert result == expected, f"Expected {expected}, got {result}"
 
 
-@pytest.mark.skipif(
-    not pytest.importorskip("numba.cuda").is_available(),
-    reason="CUDA not available",
-)
 def test_raw_iterator_constant_with_cuda_core(cuda_core_program):
     """Test RawIterator implementing a constant iterator via cuda.core C++."""
-    from numba import cuda as numba_cuda
+    import cupy as cp
 
-    import cuda.compute as cc
+    from cuda.compute import OpKind, RawIterator, float32, reduce_into
 
     arch = get_current_device_arch()
 
@@ -315,21 +294,21 @@ def test_raw_iterator_constant_with_cuda_core(cuda_core_program):
     state = constant_value.tobytes()
 
     # Create RawIterator
-    constant_iter = cc.RawIterator(
+    constant_iter = RawIterator(
         state=state,
         state_alignment=4,
-        value_type=cc.float32,
+        value_type=float32,
         advance=("constant_advance", advance_ltoir),
         input_dereference=("constant_deref", deref_ltoir),
     )
 
     # Sum 5 constant values: 7.5 * 5 = 37.5
-    d_out = numba_cuda.to_device(np.array([0.0], dtype=np.float32))
+    d_out = cp.array([0.0], dtype=cp.float32)
     h_init = np.array([0.0], dtype=np.float32)
 
-    cc.reduce_into(constant_iter, d_out, cc.OpKind.PLUS, 5, h_init)
+    reduce_into(constant_iter, d_out, OpKind.PLUS, 5, h_init)
 
-    result = d_out.copy_to_host()[0]
+    result = d_out.get()[0]
     expected = 7.5 * 5
     assert abs(result - expected) < 1e-5, f"Expected {expected}, got {result}"
 
@@ -339,15 +318,11 @@ def test_raw_iterator_constant_with_cuda_core(cuda_core_program):
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    not pytest.importorskip("numba.cuda").is_available(),
-    reason="CUDA not available",
-)
 def test_raw_op_and_iterator_combined(cuda_core_program):
     """Test using both RawOp and RawIterator together in a reduction."""
-    from numba import cuda as numba_cuda
+    import cupy as cp
 
-    import cuda.compute as cc
+    from cuda.compute import RawIterator, RawOp, int32, reduce_into
 
     arch = get_current_device_arch()
 
@@ -382,29 +357,29 @@ def test_raw_op_and_iterator_combined(cuda_core_program):
     deref_ltoir = compile_cpp_to_ltoir(cuda_core_program, deref_source, arch)
 
     # Create RawOp for multiply
-    multiply_op = cc.RawOp(
+    multiply_op = RawOp(
         ltoir=multiply_ltoir,
         name="my_multiply",
-        arg_types=(cc.int32, cc.int32),
-        return_type=cc.int32,
+        arg_types=(int32, int32),
+        return_type=int32,
     )
 
     # Create RawIterator starting at 1
     state = np.int32(1).tobytes()
-    counting_iter = cc.RawIterator(
+    counting_iter = RawIterator(
         state=state,
         state_alignment=4,
-        value_type=cc.int32,
+        value_type=int32,
         advance=("count_advance", advance_ltoir),
         input_dereference=("count_deref", deref_ltoir),
     )
 
     # Compute factorial: 1 * 2 * 3 * 4 * 5 = 120
-    d_out = numba_cuda.to_device(np.array([0], dtype=np.int32))
+    d_out = cp.array([0], dtype=cp.int32)
     h_init = np.array([1], dtype=np.int32)  # Identity for multiplication
 
-    cc.reduce_into(counting_iter, d_out, multiply_op, 5, h_init)
+    reduce_into(counting_iter, d_out, multiply_op, 5, h_init)
 
-    result = d_out.copy_to_host()[0]
+    result = d_out.get()[0]
     expected = 1 * 2 * 3 * 4 * 5
     assert result == expected, f"Expected {expected}, got {result}"
