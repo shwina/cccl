@@ -1,7 +1,5 @@
 import ctypes
 import operator
-import uuid
-from functools import lru_cache
 from typing import Callable, Tuple
 
 import numba
@@ -14,27 +12,28 @@ from numba.cuda.dispatcher import CUDADispatcher
 
 from .._bindings import IteratorState
 from .._caching import CachableFunction
+from .._numba import (
+    compile_iterator_advance,
+    compile_iterator_input_dereference,
+    compile_iterator_output_dereference,
+    get_inferred_return_type,
+    signature_from_annotations,
+)
 from .._utils.protocols import (
     compute_c_contiguous_strides_in_bytes,
     get_data_pointer,
     get_dtype,
     get_shape,
 )
-from ..numba_utils import get_inferred_return_type, signature_from_annotations
 from ..typing import DeviceArrayLike
 
 _DEVICE_POINTER_SIZE = 8
 _DEVICE_POINTER_BITWIDTH = _DEVICE_POINTER_SIZE * 8
 
 
-@lru_cache(maxsize=256)  # TODO: what's a reasonable value?
-def cached_compile(func, sig, abi_name=None, **kwargs):
-    return cuda.compile(func, sig, abi_info={"abi_name": abi_name}, **kwargs)
-
-
 class IteratorKind:
-    # The `.kind` of an iterator encapsulates additional metadata about the iterator,
-    # analogous to the `.dtype` of a NumPy array.
+    """Encapsulates type metadata for an iterator, analogous to ndarray.dtype."""
+
     def __init__(self, value_type, state_type):
         self.value_type = value_type
         self.state_type = state_type
@@ -53,10 +52,6 @@ class IteratorKind:
 
     def __hash__(self):
         return hash((type(self), self.value_type, self.state_type))
-
-
-def _get_abi_suffix(kind: IteratorKind):
-    return uuid.uuid4().hex
 
 
 class IteratorBase:
@@ -135,50 +130,33 @@ class IteratorBase:
     def is_output_iterator(self) -> bool:
         return self.output_dereference is not None
 
-    def get_advance_ltoir(self) -> Tuple:
-        from .._odr_helpers import create_advance_void_ptr_wrapper
+    def get_advance_ltoir(self) -> Tuple[str, bytes]:
+        """Compile advance method to LTOIR using Numba.
 
-        abi_name = f"advance_{_get_abi_suffix(self.kind)}"
-        wrapped_advance, wrapper_sig = create_advance_void_ptr_wrapper(
-            self.advance, self.state_ptr_type
-        )
-        ltoir, _ = cached_compile(
-            wrapped_advance,
-            wrapper_sig,
-            output="ltoir",
-            abi_name=abi_name,
-        )
-        return (abi_name, ltoir)
+        Returns:
+            Tuple of (abi_name, ltoir_bytes).
+        """
+        return compile_iterator_advance(self.advance, self.state_ptr_type)
 
-    def get_input_dereference_ltoir(self) -> Tuple:
-        from .._odr_helpers import create_input_dereference_void_ptr_wrapper
+    def get_input_dereference_ltoir(self) -> Tuple[str, bytes]:
+        """Compile input dereference method to LTOIR using Numba.
 
-        abi_name = f"input_dereference_{_get_abi_suffix(self.kind)}"
-        wrapped_deref, wrapper_sig = create_input_dereference_void_ptr_wrapper(
+        Returns:
+            Tuple of (abi_name, ltoir_bytes).
+        """
+        return compile_iterator_input_dereference(
             self.input_dereference, self.state_ptr_type, self.value_type
         )
-        ltoir, _ = cached_compile(
-            wrapped_deref,
-            wrapper_sig,
-            output="ltoir",
-            abi_name=abi_name,
-        )
-        return (abi_name, ltoir)
 
-    def get_output_dereference_ltoir(self) -> Tuple:
-        from .._odr_helpers import create_output_dereference_void_ptr_wrapper
+    def get_output_dereference_ltoir(self) -> Tuple[str, bytes]:
+        """Compile output dereference method to LTOIR using Numba.
 
-        abi_name = f"output_dereference_{_get_abi_suffix(self.kind)}"
-        wrapped_deref, wrapper_sig = create_output_dereference_void_ptr_wrapper(
+        Returns:
+            Tuple of (abi_name, ltoir_bytes).
+        """
+        return compile_iterator_output_dereference(
             self.output_dereference, self.state_ptr_type, self.value_type
         )
-        ltoir, _ = cached_compile(
-            wrapped_deref,
-            wrapper_sig,
-            output="ltoir",
-            abi_name=abi_name,
-        )
-        return (abi_name, ltoir)
 
     def __add__(self, offset: int):
         # add the offset to the iterator's state, and return a new iterator

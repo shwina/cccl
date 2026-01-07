@@ -106,6 +106,17 @@ class _Reduce:
         return temp_storage_bytes
 
 
+def _get_iterator_cache_key(it):
+    """Get cache key for an iterator (IteratorBase or RawIterator) or array."""
+    from ..raw import RawIterator
+
+    if isinstance(it, IteratorBase):
+        return it.kind
+    if isinstance(it, RawIterator):
+        return it.get_cache_key()
+    return protocols.get_dtype(it)
+
+
 def _make_cache_key(
     d_in: DeviceArrayLike | IteratorBase,
     d_out: DeviceArrayLike | IteratorBase,
@@ -113,12 +124,8 @@ def _make_cache_key(
     h_init: np.ndarray | GpuStruct,
     **kwargs,
 ):
-    d_in_key = (
-        d_in.kind if isinstance(d_in, IteratorBase) else protocols.get_dtype(d_in)
-    )
-    d_out_key = (
-        d_out.kind if isinstance(d_out, IteratorBase) else protocols.get_dtype(d_out)
-    )
+    d_in_key = _get_iterator_cache_key(d_in)
+    d_out_key = _get_iterator_cache_key(d_out)
     h_init_key = h_init.dtype
     determinism = kwargs.get("determinism", Determinism.RUN_TO_RUN)
     return (d_in_key, d_out_key, op.get_cache_key(), h_init_key, determinism)

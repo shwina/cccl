@@ -190,11 +190,23 @@ def _iterator_to_cccl_iter(it: IteratorBase, io_kind: _IteratorIO) -> Iterator:
     )
 
 
+def _raw_iterator_to_cccl_iter(it, io_kind: _IteratorIO) -> Iterator:
+    """Convert a RawIterator to a CCCL Iterator."""
+    if io_kind == _IteratorIO.INPUT:
+        return it.to_cccl_iterator("input")
+    else:
+        return it.to_cccl_iterator("output")
+
+
 def _to_cccl_iter(
     it: IteratorBase | DeviceArrayLike | None, io_kind: _IteratorIO
 ) -> Iterator:
+    from .raw import RawIterator
+
     if it is None:
         return _none_to_cccl_iter()
+    if isinstance(it, RawIterator):
+        return _raw_iterator_to_cccl_iter(it, io_kind)
     if isinstance(it, IteratorBase):
         return _iterator_to_cccl_iter(it, io_kind)
     return _device_array_to_cccl_iter(it)
@@ -260,11 +272,18 @@ def get_value_type(d_in: IteratorBase | DeviceArrayLike | GpuStruct | np.ndarray
 
 
 def set_cccl_iterator_state(cccl_it: Iterator, input_it):
+    from .raw import RawIterator
+
     if cccl_it.is_kind_pointer():
         ptr = get_data_pointer(input_it)
         ptr_obj = make_pointer_object(ptr, input_it)
         cccl_it.state = ptr_obj
     else:
+        # Handle RawIterator: state is bytes, wrap in IteratorState
+        if isinstance(input_it, RawIterator):
+            cccl_it.state = IteratorState(input_it.state)
+            return
+
         state_ = input_it.state
         if isinstance(state_, (IteratorState, Pointer)):
             cccl_it.state = state_

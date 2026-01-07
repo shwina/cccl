@@ -2,6 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+"""
+Operator adapters for cuda.compute algorithms.
+
+This module provides adapters that unify different operator types
+(well-known operations, user callables, and pre-compiled RawOp)
+into a common interface for use with cuda.compute algorithms.
+"""
+
 from typing import Callable, Hashable
 
 from ._bindings import Op, OpKind
@@ -16,7 +24,8 @@ class _OpAdapter:
     """
     Provides a unified interface for operators, whether they are:
     - Well-known operations (OpKind.PLUS, OpKind.MAXIMUM, etc.)
-    - Stateless user-provided callables
+    - Stateless user-provided callables (compiled via Numba)
+    - Pre-compiled RawOp (from any LTOIR source)
     """
 
     def get_cache_key(self) -> Hashable:
@@ -74,7 +83,7 @@ class _WellKnownOp(_OpAdapter):
 
 
 class _StatelessOp(_OpAdapter):
-    """Internal wrapper for stateless callables."""
+    """Internal wrapper for stateless callables, compiled via Numba."""
 
     __slots__ = ["_func", "_cachable"]
 
@@ -86,26 +95,41 @@ class _StatelessOp(_OpAdapter):
         return self._cachable
 
     def compile(self, input_types, output_type=None) -> Op:
-        from . import _cccl_interop as cccl
-        from .numba_utils import get_inferred_return_type, signature_from_annotations
+        from ._numba import compile_op
 
-        # Try to get signature from annotations first
-        try:
-            sig = signature_from_annotations(self._func)
-        except ValueError:
-            # Infer signature from input/output types
-            if output_type is None or (
-                hasattr(output_type, "is_internal") and not output_type.is_internal
-            ):
-                output_type = get_inferred_return_type(self._func, input_types)
-            sig = output_type(*input_types)
-
-        return cccl.to_stateless_cccl_op(self._func, sig)
+        # compile_op handles annotation inference internally
+        raw_op = compile_op(self._func, input_types, output_type)
+        return raw_op.to_cccl_op()
 
     @property
     def func(self) -> Callable:
         """Access the wrapped callable."""
         return self._func
+
+
+class _RawOpAdapter(_OpAdapter):
+    """Adapter for pre-compiled RawOp (LTOIR from any source)."""
+
+    __slots__ = ["_raw_op"]
+
+    def __init__(self, raw_op):
+        from .raw import RawOp
+
+        if not isinstance(raw_op, RawOp):
+            raise TypeError(f"Expected RawOp, got {type(raw_op)}")
+        self._raw_op = raw_op
+
+    def get_cache_key(self) -> Hashable:
+        return self._raw_op.get_cache_key()
+
+    def compile(self, input_types, output_type=None) -> Op:
+        # RawOp is already compiled, just convert to C binding Op
+        return self._raw_op.to_cccl_op()
+
+    @property
+    def raw_op(self):
+        """Access the wrapped RawOp."""
+        return self._raw_op
 
 
 # Public aliases
@@ -114,22 +138,49 @@ OpAdapter = _OpAdapter
 
 def make_op_adapter(op) -> OpAdapter:
     """
-    Create an Op from a callable or well-known OpKind.
+    Create an OpAdapter from a callable, well-known OpKind, or RawOp.
+
+    This function provides a unified interface for creating operator adapters
+    from various sources:
+    - Well-known operations (OpKind.PLUS, OpKind.MAXIMUM, etc.)
+    - Python callables (compiled to LTOIR via Numba)
+    - Pre-compiled RawOp (from any LTOIR source)
 
     Args:
-        op: Callable or OpKind
+        op: Callable, OpKind, or RawOp
 
     Returns:
-        A value with appropriate subtype of _BaseOp
+        An OpAdapter instance
+
+    Example:
+        >>> from cuda.compute import OpKind
+        >>> from cuda.compute.raw import RawOp
+        >>>
+        >>> # Well-known operation
+        >>> adapter = make_op_adapter(OpKind.PLUS)
+        >>>
+        >>> # Python callable (uses Numba)
+        >>> adapter = make_op_adapter(lambda x, y: x + y)
+        >>>
+        >>> # Pre-compiled RawOp
+        >>> raw_op = RawOp(ltoir=..., name="my_op", ...)
+        >>> adapter = make_op_adapter(raw_op)
     """
+    from .raw import RawOp
+
     # Already an _OpAdapter instance:
     if isinstance(op, _OpAdapter):
         return op
+
+    # Pre-compiled RawOp
+    if isinstance(op, RawOp):
+        return _RawOpAdapter(op)
 
     # Well-known operation
     if isinstance(op, OpKind):
         return _WellKnownOp(op)
 
+    # Assume it's a callable
     return _StatelessOp(op)
 
 
