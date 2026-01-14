@@ -6,13 +6,18 @@
 New iterator implementations using C++ codegen.
 
 This package provides iterator implementations that compile to LTOIR via
-C++ code generation, replacing the Numba-based implementations.
+C++ code generation.
 """
 
 from ._base import CompiledIterator, IteratorBase
-from ._composite import ReverseIterator, TransformIterator
+from ._constant import ConstantIterator
+from ._counting import CountingIterator
+from ._discard import DiscardIterator
+from ._permutation import PermutationIterator
 from ._protocol import IteratorProtocol
-from ._simple import ConstantIterator, CountingIterator, DiscardIterator
+from ._reverse import ReverseIterator
+from ._transform import TransformIterator
+from ._zip import ZipIterator
 
 __all__ = [
     "CompiledIterator",
@@ -21,6 +26,8 @@ __all__ = [
     "DiscardIterator",
     "IteratorBase",
     "IteratorProtocol",
+    "PermutationIterator",
     "ReverseIterator",
     "TransformIterator",
+    "ZipIterator",
 ]

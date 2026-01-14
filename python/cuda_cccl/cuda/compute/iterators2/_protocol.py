@@ -42,30 +42,30 @@ class IteratorProtocol(Protocol):
         """Return the TypeDescriptor for dereferenced values."""
         ...
 
-    def get_advance_ltoir(self) -> tuple[str, bytes]:
+    def get_advance_ltoir(self) -> tuple[str, bytes, list[bytes]]:
         """
         Get the LTOIR for the advance operation.
 
         Returns:
-            Tuple of (symbol_name, ltoir_bytes)
+            Tuple of (symbol_name, ltoir_bytes, extra_ltoirs)
         """
         ...
 
-    def get_input_dereference_ltoir(self) -> tuple[str, bytes] | None:
+    def get_input_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
         """
         Get the LTOIR for input dereference operation.
 
         Returns:
-            Tuple of (symbol_name, ltoir_bytes), or None if not an input iterator
+            Tuple of (symbol_name, ltoir_bytes, extra_ltoirs), or None if not an input iterator
         """
         ...
 
-    def get_output_dereference_ltoir(self) -> tuple[str, bytes] | None:
+    def get_output_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
         """
         Get the LTOIR for output dereference operation.
 
         Returns:
-            Tuple of (symbol_name, ltoir_bytes), or None if not an output iterator
+            Tuple of (symbol_name, ltoir_bytes, extra_ltoirs), or None if not an output iterator
         """
         ...
 
@@ -77,13 +77,4 @@ class IteratorProtocol(Protocol):
     @property
     def is_output_iterator(self) -> bool:
         """Return True if this iterator supports output dereference."""
-        ...
-
-    @property
-    def extra_ltoirs(self) -> list[bytes]:
-        """
-        Return additional LTOIR modules needed for linking.
-
-        For composite iterators, this includes the LTOIR of underlying ops.
-        """
         ...
