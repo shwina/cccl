@@ -7,7 +7,9 @@ from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
 from .._cccl_interop import (
     call_build,
+    get_iterator_kind,
     get_value_type,
+    is_iterator,
     set_cccl_iterator_state,
     to_cccl_value_state,
 )
@@ -17,7 +19,7 @@ from .._utils.protocols import (
     validate_and_get_stream,
 )
 from .._utils.temp_storage_buffer import TempStorageBuffer
-from ..iterators._iterators import IteratorBase
+from ..iterators import IteratorBase
 from ..op import OpAdapter, OpKind, make_op_adapter
 from ..typing import DeviceArrayLike, GpuStruct
 
@@ -56,9 +58,9 @@ class _SegmentedReduce:
         if (
             self.start_offsets_in_cccl.is_kind_iterator()
             and self.end_offsets_in_cccl.is_kind_iterator()
-            and isinstance(start_offsets_in, IteratorBase)
-            and isinstance(end_offsets_in, IteratorBase)
-            and start_offsets_in.kind == end_offsets_in.kind
+            and is_iterator(start_offsets_in)
+            and is_iterator(end_offsets_in)
+            and get_iterator_kind(start_offsets_in) == get_iterator_kind(end_offsets_in)
         ):
             self.end_offsets_in_cccl.host_advance_fn = (
                 self.start_offsets_in_cccl.host_advance_fn
@@ -125,12 +127,9 @@ class _SegmentedReduce:
         return temp_storage_bytes
 
 
-def _to_key(d_in: DeviceArrayLike | IteratorBase):
+def _to_key(d_in):
     "Return key for an input array-like argument or an iterator"
-    d_in_key = (
-        d_in.kind if isinstance(d_in, IteratorBase) else protocols.get_dtype(d_in)
-    )
-    return d_in_key
+    return get_iterator_kind(d_in) if is_iterator(d_in) else protocols.get_dtype(d_in)
 
 
 def _make_cache_key(
@@ -143,7 +142,7 @@ def _make_cache_key(
 ):
     d_in_key = _to_key(d_in)
     d_out_key = (
-        d_out.kind if isinstance(d_out, IteratorBase) else protocols.get_dtype(d_out)
+        get_iterator_kind(d_out) if is_iterator(d_out) else protocols.get_dtype(d_out)
     )
     start_offsets_in_key = _to_key(start_offsets_in)
     end_offsets_in_key = _to_key(end_offsets_in)

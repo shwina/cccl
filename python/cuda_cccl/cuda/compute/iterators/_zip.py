@@ -7,18 +7,32 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
 from .._bindings import IteratorState
 from .._codegen import compile_cpp_to_ltoir
 from .._types import TypeDescriptor, custom_type
 
 if TYPE_CHECKING:
-    from ._protocol import IteratorProtocol
+    pass
 
 
 def _unique_suffix() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def _is_iterator(obj) -> bool:
+    """Check if an object is an iterator."""
+    return hasattr(obj, "to_cccl_iter") and callable(obj.to_cccl_iter)
+
+
+def _ensure_iterator(obj):
+    """Wrap array in PointerIterator if needed."""
+    if _is_iterator(obj):
+        return obj
+    from ._pointer import PointerIterator
+
+    return PointerIterator(obj)
 
 
 class ZipIterator:
@@ -34,21 +48,34 @@ class ZipIterator:
         "_state_bytes",
         "_state_alignment",
         "_value_type",
+        # TypeDescriptors for each component (for Numba tuple)
+        "_component_types",
         "_state_offsets",
         "_advance_result",
         "_input_deref_result",
         "_output_deref_result",
     ]
 
-    def __init__(self, iterators: Sequence[IteratorProtocol]):
+    def __init__(self, *args):
         """
         Create a zip iterator.
 
         Args:
-            iterators: Sequence of iterators to zip together
+            *args: Iterators or arrays to zip together. Can be:
+                   - Multiple iterators/arrays: ZipIterator(it1, it2, it3)
+                   - A single sequence of iterators: ZipIterator([it1, it2, it3])
         """
+        # Handle both ZipIterator(it1, it2) and ZipIterator([it1, it2])
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            iterators = args[0]
+        else:
+            iterators = args
+
         if len(iterators) < 1:
             raise ValueError("ZipIterator requires at least one iterator")
+
+        # Wrap arrays in PointerIterator
+        iterators = [_ensure_iterator(it) for it in iterators]
 
         self._iterators = list(iterators)
         self._uid = _unique_suffix()
@@ -90,6 +117,8 @@ class ZipIterator:
         self._value_type = custom_type(
             total_size, max_val_align, f"zip{len(iterators)}"
         )
+        # Store component types for Numba Tuple conversion
+        self._component_types = tuple(it.value_type for it in self._iterators)
 
         self._advance_result: tuple[str, bytes, list[bytes]] | None = None
         self._input_deref_result: tuple[str, bytes, list[bytes]] | None = None

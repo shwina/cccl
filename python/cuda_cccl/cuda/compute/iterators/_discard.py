@@ -8,12 +8,27 @@ from __future__ import annotations
 
 import uuid
 
-from .._types import TypeDescriptor, uint8
+from .._types import TypeDescriptor, from_numpy_dtype, uint8
+from .._utils.protocols import get_dtype
 from ._base import IteratorBase
 
 
 def _unique_suffix() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def _get_value_type(arg) -> TypeDescriptor:
+    """Extract TypeDescriptor from argument."""
+    if arg is None:
+        return uint8
+    if isinstance(arg, TypeDescriptor):
+        return arg
+    # Assume it's an array-like, get dtype
+    try:
+        dtype = get_dtype(arg)
+        return from_numpy_dtype(dtype)
+    except Exception:
+        return uint8
 
 
 class DiscardIterator(IteratorBase):
@@ -24,16 +39,15 @@ class DiscardIterator(IteratorBase):
     a default value, output dereference discards the value.
     """
 
-    def __init__(self, value_type: TypeDescriptor | None = None):
+    def __init__(self, value_type=None):
         """
         Create a discard iterator.
 
         Args:
-            value_type: Optional TypeDescriptor for the value type.
-                       Defaults to uint8.
+            value_type: Optional TypeDescriptor, array, or None.
+                       If array, the dtype is used. Defaults to uint8.
         """
-        if value_type is None:
-            value_type = uint8
+        value_type = _get_value_type(value_type)
 
         self._uid = _unique_suffix()
 

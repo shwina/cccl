@@ -14,11 +14,26 @@ from .._codegen import compile_cpp_to_ltoir
 from .._types import TypeDescriptor
 
 if TYPE_CHECKING:
-    from ._protocol import IteratorProtocol
+    pass
 
 
 def _unique_suffix() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def _is_iterator(obj) -> bool:
+    """Check if an object is an iterator."""
+    return hasattr(obj, "to_cccl_iter") and callable(obj.to_cccl_iter)
+
+
+def _ensure_iterator_for_reverse(obj):
+    """Wrap array in PointerIterator at the END of the array for reverse iteration."""
+    if _is_iterator(obj):
+        return obj
+    from ._pointer import PointerIteratorAtOffset
+
+    # For arrays, create an iterator at the last element
+    return PointerIteratorAtOffset(obj, offset_from_end=1)
 
 
 class ReverseIterator:
@@ -36,14 +51,14 @@ class ReverseIterator:
         "_output_deref_result",
     ]
 
-    def __init__(self, underlying: IteratorProtocol):
+    def __init__(self, underlying):
         """
         Create a reverse iterator.
 
         Args:
-            underlying: The underlying iterator to reverse
+            underlying: The underlying iterator or array to reverse
         """
-        self._underlying = underlying
+        self._underlying = _ensure_iterator_for_reverse(underlying)
         self._uid = _unique_suffix()
 
         self._advance_result: tuple[str, bytes, list[bytes]] | None = None

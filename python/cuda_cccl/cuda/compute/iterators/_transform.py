@@ -74,15 +74,25 @@ class TransformIterator:
         if self._compiled_op is None:
             from .._bindings import TypeEnum
 
+            if self._is_input:
+                # Input iterator: transform reads from underlying and outputs value_type
+                # Input type is underlying's value_type
+                input_type = self._underlying.value_type
+                output_type = self._value_type
+            else:
+                # Output iterator: transform takes algorithm output and writes to underlying
+                # Input type is value_type (what algorithm writes), output is underlying's type
+                input_type = self._value_type
+                output_type = self._underlying.value_type
+
             # For struct types (STORAGE), let Numba infer the output type
             # since we can't easily convert TypeDescriptor back to Numba type
-            output_type = self._value_type
             if output_type.type_enum == TypeEnum.STORAGE:
                 output_type = None
 
             # Compile with UNARY_OP context
             self._compiled_op = self._transform_op.compile(
-                input_types=(self._underlying.value_type,),
+                input_types=(input_type,),
                 output_type=output_type,
                 context=OpContext.UNARY_OP,
             )

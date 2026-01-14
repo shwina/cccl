@@ -8,9 +8,10 @@ from typing import Callable
 from .. import _bindings
 from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
-from .._cccl_interop import set_cccl_iterator_state
+from .._cccl_interop import get_iterator_kind, is_iterator, set_cccl_iterator_state
+from .._types import TypeDescriptor
 from .._utils import protocols
-from ..iterators._iterators import IteratorBase
+from ..iterators import IteratorBase
 from ..op import OpAdapter, OpKind, make_op_adapter
 from ..typing import DeviceArrayLike
 
@@ -30,6 +31,10 @@ class _UnaryTransform:
         # Compile the op with input/output types
         in_type = cccl.get_value_type(d_in)
         out_type = cccl.get_value_type(d_out)
+        # For struct types (class-like), let Numba infer the return type
+        # to avoid anonymous struct type mismatch
+        if not isinstance(out_type, TypeDescriptor):
+            out_type = None
         self.op_cccl = op.compile((in_type,), out_type)
 
         self.build_result = cccl.call_build(
@@ -85,6 +90,10 @@ class _BinaryTransform:
         in1_type = cccl.get_value_type(d_in1)
         in2_type = cccl.get_value_type(d_in2)
         out_type = cccl.get_value_type(d_out)
+        # For struct types (class-like), let Numba infer the return type
+        # to avoid anonymous struct type mismatch
+        if not isinstance(out_type, TypeDescriptor):
+            out_type = None
         self.op_cccl = op.compile((in1_type, in2_type), out_type)
 
         self.build_result = cccl.call_build(
@@ -125,10 +134,10 @@ def _make_unary_transform_cache_key(
     op: OpAdapter,
 ):
     d_in_key = (
-        d_in.kind if isinstance(d_in, IteratorBase) else protocols.get_dtype(d_in)
+        get_iterator_kind(d_in) if is_iterator(d_in) else protocols.get_dtype(d_in)
     )
     d_out_key = (
-        d_out.kind if isinstance(d_out, IteratorBase) else protocols.get_dtype(d_out)
+        get_iterator_kind(d_out) if is_iterator(d_out) else protocols.get_dtype(d_out)
     )
     return (d_in_key, d_out_key, op.get_cache_key())
 
@@ -140,13 +149,13 @@ def _make_binary_transform_cache_key(
     op: OpAdapter,
 ):
     d_in1_key = (
-        d_in1.kind if isinstance(d_in1, IteratorBase) else protocols.get_dtype(d_in1)
+        get_iterator_kind(d_in1) if is_iterator(d_in1) else protocols.get_dtype(d_in1)
     )
     d_in2_key = (
-        d_in2.kind if isinstance(d_in2, IteratorBase) else protocols.get_dtype(d_in2)
+        get_iterator_kind(d_in2) if is_iterator(d_in2) else protocols.get_dtype(d_in2)
     )
     d_out_key = (
-        d_out.kind if isinstance(d_out, IteratorBase) else protocols.get_dtype(d_out)
+        get_iterator_kind(d_out) if is_iterator(d_out) else protocols.get_dtype(d_out)
     )
     return (d_in1_key, d_in2_key, d_out_key, op.get_cache_key())
 

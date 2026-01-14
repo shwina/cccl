@@ -14,11 +14,25 @@ from .._codegen import compile_cpp_to_ltoir, cpp_type_from_descriptor
 from .._types import TypeDescriptor
 
 if TYPE_CHECKING:
-    from ._protocol import IteratorProtocol
+    pass
 
 
 def _unique_suffix() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def _is_iterator(obj) -> bool:
+    """Check if an object is an iterator."""
+    return hasattr(obj, "to_cccl_iter") and callable(obj.to_cccl_iter)
+
+
+def _ensure_iterator(obj):
+    """Wrap array in PointerIterator if needed."""
+    if _is_iterator(obj):
+        return obj
+    from ._pointer import PointerIterator
+
+    return PointerIterator(obj)
 
 
 class PermutationIterator:
@@ -45,30 +59,33 @@ class PermutationIterator:
 
     def __init__(
         self,
-        values: IteratorProtocol,
-        indices: IteratorProtocol,
+        values,
+        indices,
     ):
         """
         Create a permutation iterator.
 
         Args:
-            values: Iterator providing the values to be permuted
-            indices: Iterator providing the indices for permutation
+            values: Iterator or array providing the values to be permuted
+            indices: Iterator or array providing the indices for permutation
         """
-        self._values = values
-        self._indices = indices
+        # Wrap arrays in PointerIterator
+        self._values = _ensure_iterator(values)
+        self._indices = _ensure_iterator(indices)
         self._uid = _unique_suffix()
 
         # State contains both iterators' states concatenated
-        values_state = bytes(memoryview(values.state))
-        indices_state = bytes(memoryview(indices.state))
+        values_state = bytes(memoryview(self._values.state))
+        indices_state = bytes(memoryview(self._indices.state))
 
         values_size = len(values_state)
-        indices_align = indices.state_alignment
+        indices_align = self._indices.state_alignment
         padding = (indices_align - (values_size % indices_align)) % indices_align
 
         self._state_bytes = values_state + (b"\x00" * padding) + indices_state
-        self._state_alignment = max(values.state_alignment, indices.state_alignment)
+        self._state_alignment = max(
+            self._values.state_alignment, self._indices.state_alignment
+        )
         self._values_offset = 0
         self._indices_offset = values_size + padding
 

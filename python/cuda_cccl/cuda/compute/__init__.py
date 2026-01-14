@@ -34,7 +34,7 @@ from .algorithms import (
     unique_by_key,
 )
 from .determinism import Determinism
-from .iterators2 import (
+from .iterators import (
     CacheModifiedInputIterator,
     ConstantIterator,
     CountingIterator,

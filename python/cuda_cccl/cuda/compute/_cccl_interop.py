@@ -202,12 +202,26 @@ def to_stateless_cccl_op(op, sig: "Signature") -> Op:
     )
 
 
+class ZipValueType:
+    """
+    Special type for ZipIterator values that includes component types.
+
+    This enables Numba to create a Tuple type for user-defined operations
+    that access individual elements via indexing (pair[0], pair[1]).
+    """
+
+    def __init__(self, value_type, component_types):
+        self.value_type = value_type
+        self.component_types = component_types
+
+
 def get_value_type(d_in):
     """
     Get the value type for an input array, iterator, or struct.
 
     Returns:
-        - For iterators (with to_cccl_iter): their value_type (TypeDescriptor)
+        - For ZipIterator: ZipValueType (enables Numba Tuple conversion)
+        - For other iterators (with to_cccl_iter): their value_type (TypeDescriptor)
         - For _Struct instances: the struct class itself
         - For arrays with structured dtype: an anonymous gpu_struct class
         - For arrays with scalar dtype: a TypeDescriptor
@@ -215,8 +229,11 @@ def get_value_type(d_in):
     from ._types import from_numpy_dtype
     from .struct import _Struct, gpu_struct
 
-    # Iterator protocol - returns TypeDescriptor
+    # Iterator protocol - returns TypeDescriptor or ZipValueType
     if is_iterator(d_in):
+        # ZipIterator returns ZipValueType for Numba Tuple conversion
+        if hasattr(d_in, "_component_types") and d_in._component_types is not None:
+            return ZipValueType(d_in.value_type, d_in._component_types)
         return d_in.value_type
 
     # Struct instances - return the class
