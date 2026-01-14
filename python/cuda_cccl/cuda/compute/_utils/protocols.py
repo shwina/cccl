@@ -7,6 +7,8 @@
 Utilities for extracting information from protocols such as `__cuda_array_interface__` and `__cuda_stream__`.
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import numpy as np

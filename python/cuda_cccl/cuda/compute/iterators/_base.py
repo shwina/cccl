@@ -8,10 +8,11 @@ Base classes for iterators.
 
 from __future__ import annotations
 
-from typing import Hashable, Sequence
+from typing import Hashable
 
 from .._bindings import Iterator, IteratorKind, IteratorState, Op, OpKind
 from .._types import TypeDescriptor
+from ..op import CompiledOp
 
 
 class IteratorBase:
@@ -204,9 +205,9 @@ class CompiledIterator:
         "_state_bytes",
         "_state_alignment",
         "_value_type",
-        "_advance_ltoir",
-        "_input_deref_ltoir",
-        "_output_deref_ltoir",
+        "_advance_op",
+        "_input_deref_op",
+        "_output_deref_op",
     ]
 
     def __init__(
@@ -214,13 +215,9 @@ class CompiledIterator:
         state_bytes: bytes,
         state_alignment: int,
         value_type: TypeDescriptor,
-        advance_ltoir: tuple[str, bytes, Sequence[bytes]] | tuple[str, bytes],
-        input_deref_ltoir: (
-            tuple[str, bytes, Sequence[bytes]] | tuple[str, bytes] | None
-        ) = None,
-        output_deref_ltoir: (
-            tuple[str, bytes, Sequence[bytes]] | tuple[str, bytes] | None
-        ) = None,
+        advance: CompiledOp,
+        input_dereference: CompiledOp | None = None,
+        output_dereference: CompiledOp | None = None,
     ):
         """
         Create a pre-compiled iterator.
@@ -229,36 +226,51 @@ class CompiledIterator:
             state_bytes: Raw bytes of the iterator state
             state_alignment: Alignment of the state in bytes
             value_type: TypeDescriptor for the value type
-            advance_ltoir: (symbol, ltoir) or (symbol, ltoir, extra_ltoirs)
-            input_deref_ltoir: Optional (symbol, ltoir) or (symbol, ltoir, extra_ltoirs)
-            output_deref_ltoir: Optional (symbol, ltoir) or (symbol, ltoir, extra_ltoirs)
+            advance: CompiledOp for the advance operation
+            input_dereference: Optional CompiledOp for input dereference
+            output_dereference: Optional CompiledOp for output dereference
         """
         if not isinstance(state_bytes, bytes):
             raise TypeError(f"state_bytes must be bytes, got {type(state_bytes)}")
+        if not isinstance(state_alignment, int) or state_alignment <= 0:
+            raise ValueError("state_alignment must be a positive power of 2")
+        if state_alignment & (state_alignment - 1) != 0:
+            raise ValueError("state_alignment must be a positive power of 2")
+        if not isinstance(value_type, TypeDescriptor):
+            raise TypeError(
+                f"value_type must be TypeDescriptor, got {type(value_type)}"
+            )
+        if not isinstance(advance, CompiledOp):
+            raise TypeError(f"advance must be a CompiledOp, got {type(advance)}")
+        if input_dereference is None and output_dereference is None:
+            raise ValueError(
+                "At least one of input_dereference or output_dereference must be provided"
+            )
+        if input_dereference is not None and not isinstance(
+            input_dereference, CompiledOp
+        ):
+            raise TypeError(
+                f"input_dereference must be a CompiledOp, got {type(input_dereference)}"
+            )
+        if output_dereference is not None and not isinstance(
+            output_dereference, CompiledOp
+        ):
+            raise TypeError(
+                f"output_dereference must be a CompiledOp, got {type(output_dereference)}"
+            )
 
         self._state_bytes = state_bytes
         self._state_alignment = state_alignment
         self._value_type = value_type
-        self._advance_ltoir = self._normalize_ltoir_tuple(advance_ltoir)
-        self._input_deref_ltoir = (
-            self._normalize_ltoir_tuple(input_deref_ltoir)
-            if input_deref_ltoir
-            else None
-        )
-        self._output_deref_ltoir = (
-            self._normalize_ltoir_tuple(output_deref_ltoir)
-            if output_deref_ltoir
-            else None
-        )
+        self._advance_op = advance
+        self._input_deref_op = input_dereference
+        self._output_deref_op = output_dereference
 
     @staticmethod
-    def _normalize_ltoir_tuple(
-        t: tuple[str, bytes, Sequence[bytes]] | tuple[str, bytes],
-    ) -> tuple[str, bytes, list[bytes]]:
-        """Normalize to (name, ltoir, extra_ltoirs) format."""
-        if len(t) == 2:
-            return (t[0], t[1], [])
-        return (t[0], t[1], list(t[2]))
+    def _op_to_ltoir_tuple(op: CompiledOp) -> tuple[str, bytes, list[bytes]]:
+        """Normalize a CompiledOp to (name, ltoir, extra_ltoirs)."""
+        extra_ltoirs = list(op.extra_ltoirs) if op.extra_ltoirs else []
+        return (op.name, op.ltoir, extra_ltoirs)
 
     @property
     def state(self) -> IteratorState:
@@ -277,25 +289,29 @@ class CompiledIterator:
 
     def get_advance_ltoir(self) -> tuple[str, bytes, list[bytes]]:
         """Get the LTOIR for the advance operation."""
-        return self._advance_ltoir
+        return self._op_to_ltoir_tuple(self._advance_op)
 
     def get_input_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
         """Get the LTOIR for input dereference operation."""
-        return self._input_deref_ltoir
+        if self._input_deref_op is None:
+            return None
+        return self._op_to_ltoir_tuple(self._input_deref_op)
 
     def get_output_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
         """Get the LTOIR for output dereference operation."""
-        return self._output_deref_ltoir
+        if self._output_deref_op is None:
+            return None
+        return self._op_to_ltoir_tuple(self._output_deref_op)
 
     @property
     def is_input_iterator(self) -> bool:
         """Return True if this iterator supports input dereference."""
-        return self._input_deref_ltoir is not None
+        return self._input_deref_op is not None
 
     @property
     def is_output_iterator(self) -> bool:
         """Return True if this iterator supports output dereference."""
-        return self._output_deref_ltoir is not None
+        return self._output_deref_op is not None
 
     def to_cccl_iter(self, is_output: bool = False) -> Iterator:
         """
@@ -308,7 +324,7 @@ class CompiledIterator:
             CCCL Iterator object
         """
         # Get advance op
-        adv_name, adv_ltoir, adv_extras = self._advance_ltoir
+        adv_name, adv_ltoir, adv_extras = self._op_to_ltoir_tuple(self._advance_op)
         advance_op = Op(
             operator_type=OpKind.STATELESS,
             name=adv_name,
@@ -318,13 +334,17 @@ class CompiledIterator:
 
         # Get dereference op based on direction
         if is_output:
-            if self._output_deref_ltoir is None:
+            if self._output_deref_op is None:
                 raise ValueError("This iterator does not support output operations")
-            deref_name, deref_ltoir, deref_extras = self._output_deref_ltoir
+            deref_name, deref_ltoir, deref_extras = self._op_to_ltoir_tuple(
+                self._output_deref_op
+            )
         else:
-            if self._input_deref_ltoir is None:
+            if self._input_deref_op is None:
                 raise ValueError("This iterator does not support input operations")
-            deref_name, deref_ltoir, deref_extras = self._input_deref_ltoir
+            deref_name, deref_ltoir, deref_extras = self._op_to_ltoir_tuple(
+                self._input_deref_op
+            )
 
         deref_op = Op(
             operator_type=OpKind.STATELESS,
@@ -348,8 +368,8 @@ class CompiledIterator:
         """Return a hashable kind for caching purposes."""
         return (
             "CompiledIterator",
-            self._advance_ltoir,
-            self._input_deref_ltoir,
-            self._output_deref_ltoir,
+            self._advance_op.get_cache_key(),
+            self._input_deref_op.get_cache_key() if self._input_deref_op else None,
+            self._output_deref_op.get_cache_key() if self._output_deref_op else None,
             self._value_type,
         )
