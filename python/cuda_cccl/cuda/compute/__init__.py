@@ -1,7 +1,6 @@
 # Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
 #
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-
 from ._bindings import _BINDINGS_AVAILABLE  # type: ignore[attr-defined]
 
 if not _BINDINGS_AVAILABLE:
@@ -13,6 +12,7 @@ if not _BINDINGS_AVAILABLE:
             "This typically means you're running on a CPU-only machine without CUDA drivers installed."
         )
 else:
+
     from ._caching import clear_all_caches
     from .algorithms import (
         DoubleBuffer,
@@ -56,11 +56,13 @@ else:
         TransformOutputIterator,
         ZipIterator,
     )
-    from .op import OpKind
+    from .op import CompiledOp, OpKind
     from .struct import gpu_struct
 
     __all__ = [
-        "_BINDINGS_AVAILABLE",
+        # Pre-compiled operator support
+        "CompiledOp",
+        # Algorithms
         "binary_transform",
         "clear_all_caches",
         "CacheModifiedInputIterator",
