@@ -47,7 +47,8 @@ class DiscardIterator(IteratorBase):
         symbol = f"discard_advance_{self._uid}"
 
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* offset) {{
     (void)state;
@@ -60,7 +61,8 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
         symbol = f"discard_input_deref_{self._uid}"
 
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* result) {{
     (void)state;
@@ -73,7 +75,8 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
         symbol = f"discard_output_deref_{self._uid}"
 
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* value) {{
     (void)state;

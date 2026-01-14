@@ -134,7 +134,8 @@ class PermutationIterator:
     def _compile_advance(self, indices_advance: str) -> tuple[str, bytes]:
         symbol = f"permutation_advance_{self._uid}"
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {indices_advance}(void*, void*);
 
@@ -157,8 +158,9 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
         values_state_size = len(bytes(memoryview(self._values.state)))
 
         source = f"""
-#include <cstdint>
-#include <cstring>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
+#include <cuda/std/cstring>
 
 extern "C" __device__ void {indices_deref}(void*, void*);
 extern "C" __device__ void {values_advance}(void*, void*);
@@ -193,8 +195,9 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
         values_state_size = len(bytes(memoryview(self._values.state)))
 
         source = f"""
-#include <cstdint>
-#include <cstring>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
+#include <cuda/std/cstring>
 
 extern "C" __device__ void {indices_deref}(void*, void*);
 extern "C" __device__ void {values_advance}(void*, void*);
@@ -250,3 +253,46 @@ extern "C" __device__ void {symbol}(void* state, void* value) {{
     @property
     def is_output_iterator(self) -> bool:
         return self._values.is_output_iterator
+
+    def to_cccl_iter(self, is_output: bool = False):
+        """Convert to CCCL Iterator for algorithm interop."""
+        from .._bindings import Iterator, IteratorKind, Op, OpKind
+
+        adv_name, adv_ltoir, adv_extras = self.get_advance_ltoir()
+        advance_op = Op(
+            operator_type=OpKind.STATELESS,
+            name=adv_name,
+            ltoir=adv_ltoir,
+            extra_ltoirs=adv_extras if adv_extras else None,
+        )
+
+        if is_output:
+            deref_result = self.get_output_dereference_ltoir()
+            if deref_result is None:
+                raise ValueError("This iterator does not support output operations")
+        else:
+            deref_result = self.get_input_dereference_ltoir()
+            if deref_result is None:
+                raise ValueError("This iterator does not support input operations")
+
+        deref_name, deref_ltoir, deref_extras = deref_result
+        deref_op = Op(
+            operator_type=OpKind.STATELESS,
+            name=deref_name,
+            ltoir=deref_ltoir,
+            extra_ltoirs=deref_extras if deref_extras else None,
+        )
+
+        return Iterator(
+            self.state_alignment,
+            IteratorKind.ITERATOR,
+            advance_op,
+            deref_op,
+            self.value_type.to_type_info(),
+            state=self.state,
+        )
+
+    @property
+    def kind(self):
+        """Return a hashable kind for caching purposes."""
+        return ("PermutationIterator", self._values.kind, self._indices.kind)

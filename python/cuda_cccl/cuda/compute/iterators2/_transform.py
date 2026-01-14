@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from .._bindings import IteratorState
 from .._codegen import compile_cpp_to_ltoir, cpp_type_from_descriptor
 from .._types import TypeDescriptor
-from ..op import CompiledOp
+from ..op import OpContext, OpProtocol
 
 if TYPE_CHECKING:
     from ._protocol import IteratorProtocol
@@ -39,12 +39,13 @@ class TransformIterator:
         "_input_deref_result",
         "_output_deref_result",
         "_is_input",
+        "_compiled_op",
     ]
 
     def __init__(
         self,
-        underlying: IteratorProtocol,
-        transform_op: CompiledOp,
+        underlying: "IteratorProtocol",
+        transform_op: OpProtocol,
         output_value_type: TypeDescriptor,
         is_input: bool = True,
     ):
@@ -53,7 +54,7 @@ class TransformIterator:
 
         Args:
             underlying: The underlying iterator to transform
-            transform_op: The unary transform operation (must be CompiledOp)
+            transform_op: The unary transform operation (OpProtocol)
             output_value_type: TypeDescriptor for the transformed value type
             is_input: True for input iterator, False for output iterator
         """
@@ -66,6 +67,26 @@ class TransformIterator:
         self._advance_result: tuple[str, bytes, list[bytes]] | None = None
         self._input_deref_result: tuple[str, bytes, list[bytes]] | None = None
         self._output_deref_result: tuple[str, bytes, list[bytes]] | None = None
+        self._compiled_op = None  # Lazy compiled Op
+
+    def _get_compiled_op(self):
+        """Get the compiled Op, compiling lazily if needed."""
+        if self._compiled_op is None:
+            from .._bindings import TypeEnum
+
+            # For struct types (STORAGE), let Numba infer the output type
+            # since we can't easily convert TypeDescriptor back to Numba type
+            output_type = self._value_type
+            if output_type.type_enum == TypeEnum.STORAGE:
+                output_type = None
+
+            # Compile with UNARY_OP context
+            self._compiled_op = self._transform_op.compile(
+                input_types=(self._underlying.value_type,),
+                output_type=output_type,
+                context=OpContext.UNARY_OP,
+            )
+        return self._compiled_op
 
     def _compile_if_needed(self) -> None:
         if self._advance_result is not None:
@@ -80,9 +101,10 @@ class TransformIterator:
         self._advance_result = (symbol, ltoir, [adv_ltoir] + adv_extras)
 
         # Get transform op info
-        op_name = self._transform_op.name
-        op_ltoir = self._transform_op.ltoir
-        op_extras = list(self._transform_op.extra_ltoirs)
+        compiled_op = self._get_compiled_op()
+        op_name = compiled_op.name
+        op_ltoir = compiled_op.ltoir
+        op_extras = list(compiled_op.extra_ltoirs) if compiled_op.extra_ltoirs else []
 
         if self._is_input:
             in_result = self._underlying.get_input_dereference_ltoir()
@@ -113,7 +135,8 @@ class TransformIterator:
     def _compile_advance(self, underlying_advance: str) -> tuple[str, bytes]:
         symbol = f"transform_advance_{self._uid}"
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {underlying_advance}(void*, void*);
 
@@ -131,7 +154,8 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
         underlying_type = cpp_type_from_descriptor(self._underlying.value_type)
 
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {underlying_deref}(void*, void*);
 extern "C" __device__ void {transform_op}(void*, void*);
@@ -152,7 +176,8 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
         underlying_type = cpp_type_from_descriptor(self._underlying.value_type)
 
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {underlying_deref}(void*, void*);
 extern "C" __device__ void {transform_op}(void*, void*);
@@ -198,3 +223,54 @@ extern "C" __device__ void {symbol}(void* state, void* value) {{
     @property
     def is_output_iterator(self) -> bool:
         return not self._is_input
+
+    def to_cccl_iter(self, is_output: bool = False):
+        """Convert to CCCL Iterator for algorithm interop."""
+        from .._bindings import Iterator, IteratorKind, Op, OpKind
+
+        # Get advance op
+        adv_name, adv_ltoir, adv_extras = self.get_advance_ltoir()
+        advance_op = Op(
+            operator_type=OpKind.STATELESS,
+            name=adv_name,
+            ltoir=adv_ltoir,
+            extra_ltoirs=adv_extras if adv_extras else None,
+        )
+
+        # Get dereference op based on direction
+        if is_output:
+            deref_result = self.get_output_dereference_ltoir()
+            if deref_result is None:
+                raise ValueError("This iterator does not support output operations")
+        else:
+            deref_result = self.get_input_dereference_ltoir()
+            if deref_result is None:
+                raise ValueError("This iterator does not support input operations")
+
+        deref_name, deref_ltoir, deref_extras = deref_result
+        deref_op = Op(
+            operator_type=OpKind.STATELESS,
+            name=deref_name,
+            ltoir=deref_ltoir,
+            extra_ltoirs=deref_extras if deref_extras else None,
+        )
+
+        return Iterator(
+            self.state_alignment,
+            IteratorKind.ITERATOR,
+            advance_op,
+            deref_op,
+            self._value_type.to_type_info(),
+            state=self.state,
+        )
+
+    @property
+    def kind(self):
+        """Return a hashable kind for caching purposes."""
+        return (
+            "TransformIterator",
+            self._is_input,
+            self._transform_op.get_cache_key(),
+            self._underlying.kind,
+            self._value_type,
+        )

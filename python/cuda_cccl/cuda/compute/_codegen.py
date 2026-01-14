@@ -28,10 +28,10 @@ def _get_arch_string() -> str:
 
 
 @functools.lru_cache(maxsize=1)
-def _get_include_options() -> tuple[str, ...]:
-    """Get include path options for CCCL headers."""
+def _get_include_paths() -> list[str]:
+    """Get include paths for CCCL headers."""
     paths = get_include_paths().as_tuple()
-    return tuple(f"-I{p}" for p in paths if p is not None)
+    return [p for p in paths if p is not None]
 
 
 def _compute_source_hash(source: str, symbols: tuple[str, ...]) -> str:
@@ -71,7 +71,7 @@ def compile_cpp_to_ltoir(
         arch = _get_arch_string()
 
     # Get include paths
-    include_opts = _get_include_options()
+    include_paths = _get_include_paths()
 
     # Configure compilation options for LTO
     opts = ProgramOptions(
@@ -79,7 +79,7 @@ def compile_cpp_to_ltoir(
         relocatable_device_code=True,
         link_time_optimization=True,
         std="c++17",
-        extra_options=include_opts,
+        include_path=include_paths,
     )
 
     # Compile to LTOIR

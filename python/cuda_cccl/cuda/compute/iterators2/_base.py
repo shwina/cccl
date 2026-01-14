@@ -8,9 +8,9 @@ Base classes for iterators.
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Hashable, Sequence
 
-from .._bindings import IteratorState
+from .._bindings import Iterator, IteratorKind, IteratorState, Op, OpKind
 from .._types import TypeDescriptor
 
 
@@ -121,6 +121,62 @@ class IteratorBase:
     def is_output_iterator(self) -> bool:
         """Return True if this iterator supports output dereference."""
         return self._generate_output_deref_source() is not None
+
+    def to_cccl_iter(self, is_output: bool = False) -> Iterator:
+        """
+        Convert this iterator to a CCCL Iterator for algorithm interop.
+
+        Args:
+            is_output: If True, use output_dereference; otherwise use input_dereference
+
+        Returns:
+            CCCL Iterator object
+        """
+        # Get advance op
+        adv_name, adv_ltoir, adv_extras = self.get_advance_ltoir()
+        advance_op = Op(
+            operator_type=OpKind.STATELESS,
+            name=adv_name,
+            ltoir=adv_ltoir,
+            extra_ltoirs=adv_extras if adv_extras else None,
+        )
+
+        # Get dereference op based on direction
+        if is_output:
+            deref_result = self.get_output_dereference_ltoir()
+            if deref_result is None:
+                raise ValueError("This iterator does not support output operations")
+        else:
+            deref_result = self.get_input_dereference_ltoir()
+            if deref_result is None:
+                raise ValueError("This iterator does not support input operations")
+
+        deref_name, deref_ltoir, deref_extras = deref_result
+        deref_op = Op(
+            operator_type=OpKind.STATELESS,
+            name=deref_name,
+            ltoir=deref_ltoir,
+            extra_ltoirs=deref_extras if deref_extras else None,
+        )
+
+        # Create the CCCL Iterator
+        return Iterator(
+            self._state_alignment,
+            IteratorKind.ITERATOR,
+            advance_op,
+            deref_op,
+            self._value_type.to_type_info(),
+            state=self.state,
+        )
+
+    @property
+    def kind(self) -> Hashable:
+        """Return a hashable kind for caching purposes.
+
+        Note: state_bytes is intentionally excluded - iterators with the same
+        type structure but different runtime state should share cached reducers.
+        """
+        return (type(self).__name__, self._value_type)
 
     # Abstract methods for subclasses
     def _generate_advance_source(self) -> tuple[str, str]:
@@ -240,3 +296,60 @@ class CompiledIterator:
     def is_output_iterator(self) -> bool:
         """Return True if this iterator supports output dereference."""
         return self._output_deref_ltoir is not None
+
+    def to_cccl_iter(self, is_output: bool = False) -> Iterator:
+        """
+        Convert this iterator to a CCCL Iterator for algorithm interop.
+
+        Args:
+            is_output: If True, use output_dereference; otherwise use input_dereference
+
+        Returns:
+            CCCL Iterator object
+        """
+        # Get advance op
+        adv_name, adv_ltoir, adv_extras = self._advance_ltoir
+        advance_op = Op(
+            operator_type=OpKind.STATELESS,
+            name=adv_name,
+            ltoir=adv_ltoir,
+            extra_ltoirs=adv_extras if adv_extras else None,
+        )
+
+        # Get dereference op based on direction
+        if is_output:
+            if self._output_deref_ltoir is None:
+                raise ValueError("This iterator does not support output operations")
+            deref_name, deref_ltoir, deref_extras = self._output_deref_ltoir
+        else:
+            if self._input_deref_ltoir is None:
+                raise ValueError("This iterator does not support input operations")
+            deref_name, deref_ltoir, deref_extras = self._input_deref_ltoir
+
+        deref_op = Op(
+            operator_type=OpKind.STATELESS,
+            name=deref_name,
+            ltoir=deref_ltoir,
+            extra_ltoirs=deref_extras if deref_extras else None,
+        )
+
+        # Create the CCCL Iterator
+        return Iterator(
+            self._state_alignment,
+            IteratorKind.ITERATOR,
+            advance_op,
+            deref_op,
+            self._value_type.to_type_info(),
+            state=self.state,
+        )
+
+    @property
+    def kind(self) -> Hashable:
+        """Return a hashable kind for caching purposes."""
+        return (
+            "CompiledIterator",
+            self._advance_ltoir,
+            self._input_deref_ltoir,
+            self._output_deref_ltoir,
+            self._value_type,
+        )

@@ -51,6 +51,13 @@ def _type_descriptor_to_numba(td: TypeDescriptor):
     if td.type_enum in enum_to_numba:
         return enum_to_numba[td.type_enum]
 
+    # Handle complex types (they come through as STORAGE with specific names)
+    if td.type_enum == TypeEnum.STORAGE:
+        if td.name == "complex64":
+            return types.complex64
+        if td.name == "complex128":
+            return types.complex128
+
     # For STORAGE types (structs), conversion requires gpu_struct registration
     raise ValueError(
         f"Cannot convert TypeDescriptor({td.name}) to internal type. "
@@ -200,6 +207,8 @@ def _internal_type_to_type_info(internal_type: types.Type):
         types.float32: TypeEnum.FLOAT32,
         types.float64: TypeEnum.FLOAT64,
         types.boolean: TypeEnum.BOOLEAN,
+        types.complex64: TypeEnum.STORAGE,
+        types.complex128: TypeEnum.STORAGE,
     }
     type_enum = type_enum_map.get(internal_type, TypeEnum.STORAGE)
 

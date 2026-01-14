@@ -11,10 +11,10 @@ cuda.compute algorithms.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Hashable, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from .._bindings import IteratorState
+    from .._bindings import Iterator, IteratorState
     from .._types import TypeDescriptor
 
 
@@ -77,4 +77,21 @@ class IteratorProtocol(Protocol):
     @property
     def is_output_iterator(self) -> bool:
         """Return True if this iterator supports output dereference."""
+        ...
+
+    def to_cccl_iter(self, is_output: bool = False) -> Iterator:
+        """
+        Convert this iterator to a CCCL Iterator for algorithm interop.
+
+        Args:
+            is_output: If True, use output_dereference; otherwise use input_dereference
+
+        Returns:
+            CCCL Iterator object
+        """
+        ...
+
+    @property
+    def kind(self) -> Hashable:
+        """Return a hashable kind for caching purposes."""
         ...

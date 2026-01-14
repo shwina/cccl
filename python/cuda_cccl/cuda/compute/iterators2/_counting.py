@@ -53,7 +53,8 @@ class CountingIterator(IteratorBase):
         cpp_type = cpp_type_from_descriptor(self._value_type)
 
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* offset) {{
     auto* s = static_cast<{cpp_type}*>(state);
@@ -68,7 +69,8 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
         cpp_type = cpp_type_from_descriptor(self._value_type)
 
         source = f"""
-#include <cstdint>
+#include <cuda/std/cstdint>
+using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* result) {{
     *static_cast<{cpp_type}*>(result) = *static_cast<{cpp_type}*>(state);

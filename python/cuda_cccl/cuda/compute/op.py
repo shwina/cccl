@@ -208,6 +208,7 @@ class CompiledOp:
             ltoir=self._ltoir,
             state_alignment=1,
             state=b"",
+            extra_ltoirs=list(self._extra_ltoirs) if self._extra_ltoirs else None,
         )
 
     @property
