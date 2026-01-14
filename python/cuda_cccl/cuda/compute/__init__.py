@@ -45,10 +45,13 @@ from .iterators import (
     TransformOutputIterator,
     ZipIterator,
 )
-from .op import OpKind
+from .op import CompiledOp, OpKind
 from .struct import gpu_struct
 
 __all__ = [
+    # Pre-compiled operator support
+    "CompiledOp",
+    # Algorithms
     "binary_transform",
     "clear_all_caches",
     "CacheModifiedInputIterator",
