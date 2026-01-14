@@ -125,16 +125,21 @@ def reverse_iterator_array(request):
 def test_reverse_iterator(reverse_iterator_array):
     it = ReverseIterator(reverse_iterator_array)
 
-    # Create array of size 1 from memory pointer of last element
-    arr = cp.ndarray(
-        shape=(1,),
-        dtype=reverse_iterator_array.dtype,
-        memptr=cp.cuda.MemoryPointer(
-            cp.cuda.UnownedMemory(it.cvalue.value, 0, None), 0
-        ),
-    )
+    # Use a simple transform to read the first element from the reverse iterator.
+    # This validates that the iterator starts at the last element.
+    def get_value(x):
+        return x
 
-    assert -999 == arr[0]
+    if isinstance(reverse_iterator_array, cp.ndarray):
+        out = cp.empty((1,), dtype=reverse_iterator_array.dtype)
+        cuda.compute.unary_transform(it, out, get_value, 1)
+        result = out.get()[0]
+    else:
+        out = numba.cuda.device_array((1,), dtype=reverse_iterator_array.dtype)
+        cuda.compute.unary_transform(it, out, get_value, 1)
+        result = out.copy_to_host()[0]
+
+    assert -999 == result
 
 
 def test_reverse_input_iterator_equality():

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ctypes
+import math
 import uuid
 from typing import TYPE_CHECKING
 
@@ -76,6 +77,7 @@ class PointerIterator(IteratorBase):
             # Scalar type - use typed pointer arithmetic
             source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* offset) {{
@@ -88,6 +90,7 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
             # Struct type - use byte-level pointer arithmetic
             source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* offset) {{
@@ -105,6 +108,7 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
             # Scalar type - use typed dereference
             source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* result) {{
@@ -116,6 +120,7 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
             # Struct type - use memcpy
             source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 #include <cuda/std/cstring>
 using namespace cuda::std;
 
@@ -133,6 +138,7 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
             # Scalar type - use typed dereference
             source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* value) {{
@@ -144,6 +150,7 @@ extern "C" __device__ void {symbol}(void* state, void* value) {{
             # Struct type - use memcpy
             source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 #include <cuda/std/cstring>
 using namespace cuda::std;
 
@@ -177,13 +184,18 @@ class PointerIteratorAtOffset(IteratorBase):
 
         # Calculate the offset pointer
         # For offset_from_end=1, we want ptr + (len-1) * itemsize
-        array_len = array.shape[0] if hasattr(array, "shape") else len(array)
+        if hasattr(array, "size"):
+            array_len = int(array.size)
+        elif hasattr(array, "shape"):
+            array_len = int(math.prod(array.shape))
+        else:
+            array_len = len(array)
         offset_ptr = ptr + (array_len - offset_from_end) * dtype.itemsize
 
         # State is just the pointer (8 bytes on 64-bit)
-        state_bytes = ctypes.c_void_p(offset_ptr)
+        state_ptr = ctypes.c_void_p(offset_ptr)
         state_bytes_buffer = (ctypes.c_char * 8)()
-        ctypes.memmove(state_bytes_buffer, ctypes.byref(state_bytes), 8)
+        ctypes.memmove(state_bytes_buffer, ctypes.byref(state_ptr), 8)
         state_bytes = bytes(state_bytes_buffer)
 
         self._uid = _unique_suffix()

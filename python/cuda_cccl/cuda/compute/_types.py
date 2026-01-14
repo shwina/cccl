@@ -21,6 +21,9 @@ import numpy as np
 
 from ._bindings import TypeEnum, TypeInfo
 
+# Map TypeDescriptor name -> numpy dtype for structured dtypes
+_STRUCT_DTYPE_BY_NAME: dict[str, np.dtype] = {}
+
 
 class TypeDescriptor:
     """
@@ -157,9 +160,11 @@ def from_numpy_dtype(dtype: np.dtype) -> TypeDescriptor:
 
     # For structured/record types, use STORAGE enum
     if dtype.fields is not None:
-        return TypeDescriptor(
+        type_desc = TypeDescriptor(
             dtype.itemsize, dtype.alignment, TypeEnum.STORAGE, f"struct({dtype})"
         )
+        _STRUCT_DTYPE_BY_NAME[type_desc.name] = dtype
+        return type_desc
 
     # Fallback for any other type
     type_enum = _NUMPY_DTYPE_TO_ENUM.get(dtype, TypeEnum.STORAGE)
@@ -186,6 +191,11 @@ def custom_type(size: int, alignment: int, name: str = "custom") -> TypeDescript
         my_struct_type = custom_type(16, 8, "MyStruct")
     """
     return TypeDescriptor(size, alignment, TypeEnum.STORAGE, name)
+
+
+def dtype_from_type_descriptor(type_desc: TypeDescriptor) -> np.dtype | None:
+    """Return the numpy dtype for a structured TypeDescriptor, if known."""
+    return _STRUCT_DTYPE_BY_NAME.get(type_desc.name)
 
 
 def pointer_type() -> TypeDescriptor:

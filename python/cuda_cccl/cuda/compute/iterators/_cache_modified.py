@@ -81,6 +81,7 @@ class CacheModifiedInputIterator(IteratorBase):
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* offset) {{
@@ -101,6 +102,7 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
         if self._value_type.size in (4, 8):
             source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* result) {{
@@ -113,6 +115,7 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
             # (cache modifiers for small types aren't as beneficial)
             source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* result) {{

@@ -190,6 +190,7 @@ class ZipIterator:
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 {externs}
@@ -228,6 +229,7 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 {externs}
@@ -265,6 +267,7 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 {externs}

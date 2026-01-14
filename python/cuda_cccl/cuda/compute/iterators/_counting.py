@@ -54,6 +54,7 @@ class CountingIterator(IteratorBase):
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* offset) {{

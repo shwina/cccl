@@ -22,7 +22,7 @@ from .._cccl_interop import (
 from .._utils import protocols
 from .._utils.protocols import get_data_pointer, validate_and_get_stream
 from .._utils.temp_storage_buffer import TempStorageBuffer
-from ..iterators import IteratorBase
+from ..iterators import IteratorProtocol
 from ..op import OpAdapter, OpKind, make_op_adapter
 from ..typing import DeviceArrayLike, GpuStruct
 
@@ -54,8 +54,8 @@ class _Scan:
     # TODO: constructor shouldn't require concrete `d_in`, `d_out`:
     def __init__(
         self,
-        d_in: DeviceArrayLike | IteratorBase,
-        d_out: DeviceArrayLike | IteratorBase,
+        d_in: DeviceArrayLike | IteratorProtocol,
+        d_out: DeviceArrayLike | IteratorProtocol,
         op: OpAdapter,
         init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
         force_inclusive: bool,
@@ -167,8 +167,8 @@ class _Scan:
 
 
 def _make_cache_key(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
     op: OpAdapter,
     init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
 ):
@@ -194,8 +194,8 @@ def _make_cache_key(
 
 @cache_with_key(_make_cache_key)
 def _make_exclusive_scan_cached(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
     op: OpAdapter,
     init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
 ):
@@ -205,8 +205,8 @@ def _make_exclusive_scan_cached(
 
 @cache_with_key(_make_cache_key)
 def _make_inclusive_scan_cached(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
     op: OpAdapter,
     init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
 ):
@@ -217,8 +217,8 @@ def _make_inclusive_scan_cached(
 # TODO Figure out `sum` without operator and initial value
 # TODO Accept stream
 def make_exclusive_scan(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
     op: Callable | OpKind,
     init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
 ):
@@ -246,8 +246,8 @@ def make_exclusive_scan(
 
 
 def exclusive_scan(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
     op: Callable | OpKind,
     init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
     num_items: int,
@@ -283,8 +283,8 @@ def exclusive_scan(
 # TODO Figure out `sum` without operator and initial value
 # TODO Accept stream
 def make_inclusive_scan(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
     op: Callable | OpKind,
     init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
 ):
@@ -312,8 +312,8 @@ def make_inclusive_scan(
 
 
 def inclusive_scan(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
     op: Callable | OpKind,
     init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
     num_items: int,

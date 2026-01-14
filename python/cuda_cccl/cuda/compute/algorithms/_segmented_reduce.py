@@ -19,7 +19,7 @@ from .._utils.protocols import (
     validate_and_get_stream,
 )
 from .._utils.temp_storage_buffer import TempStorageBuffer
-from ..iterators import IteratorBase
+from ..iterators import IteratorProtocol
 from ..op import OpAdapter, OpKind, make_op_adapter
 from ..typing import DeviceArrayLike, GpuStruct
 
@@ -38,10 +38,10 @@ class _SegmentedReduce:
 
     def __init__(
         self,
-        d_in: DeviceArrayLike | IteratorBase,
-        d_out: DeviceArrayLike | IteratorBase,
-        start_offsets_in: DeviceArrayLike | IteratorBase,
-        end_offsets_in: DeviceArrayLike | IteratorBase,
+        d_in: DeviceArrayLike | IteratorProtocol,
+        d_out: DeviceArrayLike | IteratorProtocol,
+        start_offsets_in: DeviceArrayLike | IteratorProtocol,
+        end_offsets_in: DeviceArrayLike | IteratorProtocol,
         op: OpAdapter,
         h_init: np.ndarray | GpuStruct,
     ):
@@ -50,22 +50,29 @@ class _SegmentedReduce:
         self.start_offsets_in_cccl = cccl.to_cccl_input_iter(start_offsets_in)
         self.end_offsets_in_cccl = cccl.to_cccl_input_iter(end_offsets_in)
 
-        # set host advance functions
-        cccl.cccl_iterator_set_host_advance(self.d_out_cccl, d_out)
-        cccl.cccl_iterator_set_host_advance(
-            self.start_offsets_in_cccl, start_offsets_in
-        )
+        # Host advance functions are optional; only wire them when explicitly provided.
+        if self.d_out_cccl.is_kind_iterator() and getattr(d_out, "host_advance", None):
+            cccl.cccl_iterator_set_host_advance(self.d_out_cccl, d_out)
+        if self.start_offsets_in_cccl.is_kind_iterator() and getattr(
+            start_offsets_in, "host_advance", None
+        ):
+            cccl.cccl_iterator_set_host_advance(
+                self.start_offsets_in_cccl, start_offsets_in
+            )
         if (
             self.start_offsets_in_cccl.is_kind_iterator()
             and self.end_offsets_in_cccl.is_kind_iterator()
             and is_iterator(start_offsets_in)
             and is_iterator(end_offsets_in)
             and get_iterator_kind(start_offsets_in) == get_iterator_kind(end_offsets_in)
+            and self.start_offsets_in_cccl.host_advance_fn is not None
         ):
             self.end_offsets_in_cccl.host_advance_fn = (
                 self.start_offsets_in_cccl.host_advance_fn
             )
-        else:
+        elif self.end_offsets_in_cccl.is_kind_iterator() and getattr(
+            end_offsets_in, "host_advance", None
+        ):
             cccl.cccl_iterator_set_host_advance(
                 self.end_offsets_in_cccl, end_offsets_in
             )
@@ -97,6 +104,10 @@ class _SegmentedReduce:
         h_init,
         stream=None,
     ):
+        if num_segments > 2**31 - 1:
+            raise ValueError(
+                "num_segments exceeds int32 range; iterator host advance required."
+            )
         set_cccl_iterator_state(self.d_in_cccl, d_in)
         set_cccl_iterator_state(self.d_out_cccl, d_out)
         set_cccl_iterator_state(self.start_offsets_in_cccl, start_offsets_in)
@@ -133,10 +144,10 @@ def _to_key(d_in):
 
 
 def _make_cache_key(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
-    start_offsets_in: DeviceArrayLike | IteratorBase,
-    end_offsets_in: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
+    start_offsets_in: DeviceArrayLike | IteratorProtocol,
+    end_offsets_in: DeviceArrayLike | IteratorProtocol,
     op: OpAdapter,
     h_init: np.ndarray | GpuStruct,
 ):
@@ -159,10 +170,10 @@ def _make_cache_key(
 
 @cache_with_key(_make_cache_key)
 def _make_segmented_reduce_cached(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
-    start_offsets_in: DeviceArrayLike | IteratorBase,
-    end_offsets_in: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
+    start_offsets_in: DeviceArrayLike | IteratorProtocol,
+    end_offsets_in: DeviceArrayLike | IteratorProtocol,
     op: OpAdapter,
     h_init: np.ndarray | GpuStruct,
 ):
@@ -171,10 +182,10 @@ def _make_segmented_reduce_cached(
 
 
 def make_segmented_reduce(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
-    start_offsets_in: DeviceArrayLike | IteratorBase,
-    end_offsets_in: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
+    start_offsets_in: DeviceArrayLike | IteratorProtocol,
+    end_offsets_in: DeviceArrayLike | IteratorProtocol,
     op: Callable | OpKind,
     h_init: np.ndarray | GpuStruct,
 ):
@@ -206,10 +217,10 @@ def make_segmented_reduce(
 
 
 def segmented_reduce(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_out: DeviceArrayLike | IteratorBase,
-    start_offsets_in: DeviceArrayLike | IteratorBase,
-    end_offsets_in: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_out: DeviceArrayLike | IteratorProtocol,
+    start_offsets_in: DeviceArrayLike | IteratorProtocol,
+    end_offsets_in: DeviceArrayLike | IteratorProtocol,
     op: Callable | OpKind,
     h_init: np.ndarray | GpuStruct,
     num_segments: int,

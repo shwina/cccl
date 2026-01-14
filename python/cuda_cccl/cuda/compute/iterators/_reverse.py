@@ -89,6 +89,7 @@ class ReverseIterator:
         symbol = f"reverse_advance_{self._uid}"
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {underlying_advance}(void*, void*);
@@ -105,6 +106,7 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
         symbol = f"reverse_input_deref_{self._uid}"
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {underlying_deref}(void*, void*);
@@ -120,6 +122,7 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
         symbol = f"reverse_output_deref_{self._uid}"
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {underlying_deref}(void*, void*);

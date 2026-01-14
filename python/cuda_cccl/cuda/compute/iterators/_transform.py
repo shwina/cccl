@@ -146,6 +146,7 @@ class TransformIterator:
         symbol = f"transform_advance_{self._uid}"
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {underlying_advance}(void*, void*);
@@ -165,6 +166,7 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {underlying_deref}(void*, void*);
@@ -200,6 +202,23 @@ extern "C" __device__ void {symbol}(void* state, void* value) {{
 """
         ltoir = compile_cpp_to_ltoir(source, (symbol,))
         return (symbol, ltoir)
+
+    def advance(self, offset: int) -> "TransformIterator":
+        """Return a new iterator advanced by offset elements."""
+        if not hasattr(self._underlying, "advance"):
+            raise AttributeError("Underlying iterator does not support advance")
+        return TransformIterator(
+            self._underlying.advance(offset),
+            self._transform_op,
+            self._value_type,
+            is_input=self._is_input,
+        )
+
+    def __add__(self, offset: int) -> "TransformIterator":
+        return self.advance(offset)
+
+    def __radd__(self, offset: int) -> "TransformIterator":
+        return self.advance(offset)
 
     @property
     def state(self) -> IteratorState:

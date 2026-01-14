@@ -9,7 +9,7 @@ import os
 import subprocess
 import tempfile
 import warnings
-from typing import TYPE_CHECKING, Callable, List
+from typing import TYPE_CHECKING, Callable, List, TypeGuard
 
 import numba
 import numpy as np
@@ -60,6 +60,8 @@ _TYPE_TO_ENUM = {
 
 if TYPE_CHECKING:
     from numba.core.typing import Signature
+
+    from .iterators._protocol import IteratorProtocol
 
 
 def _type_to_enum(numba_type: types.Type) -> TypeEnum:
@@ -139,7 +141,7 @@ def type_enum_as_name(enum_value: int) -> str:
     )[enum_value]
 
 
-def is_iterator(obj) -> bool:
+def is_iterator(obj: object) -> TypeGuard["IteratorProtocol"]:
     """Check if an object is an iterator (has to_cccl_iter method)."""
     return hasattr(obj, "to_cccl_iter") and callable(obj.to_cccl_iter)
 

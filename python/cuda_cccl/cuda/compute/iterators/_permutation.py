@@ -152,6 +152,7 @@ class PermutationIterator:
         symbol = f"permutation_advance_{self._uid}"
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {indices_advance}(void*, void*);
@@ -176,6 +177,7 @@ extern "C" __device__ void {symbol}(void* state, void* offset) {{
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 #include <cuda/std/cstring>
 
@@ -213,6 +215,7 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 #include <cuda/std/cstring>
 

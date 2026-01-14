@@ -18,17 +18,17 @@ from .._cccl_interop import (
 )
 from .._utils import protocols
 from .._utils.temp_storage_buffer import TempStorageBuffer
-from ..iterators import IteratorBase
+from ..iterators import IteratorProtocol
 from ..op import OpAdapter, make_op_adapter
 from ..typing import DeviceArrayLike
 
 
 def _make_cache_key(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_first_part_out: DeviceArrayLike | IteratorBase,
-    d_second_part_out: DeviceArrayLike | IteratorBase,
-    d_unselected_out: DeviceArrayLike | IteratorBase,
-    d_num_selected_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_first_part_out: DeviceArrayLike | IteratorProtocol,
+    d_second_part_out: DeviceArrayLike | IteratorProtocol,
+    d_unselected_out: DeviceArrayLike | IteratorProtocol,
+    d_num_selected_out: DeviceArrayLike | IteratorProtocol,
     select_first_part_op: OpAdapter,
     select_second_part_op: OpAdapter,
 ):
@@ -83,11 +83,11 @@ class _ThreeWayPartition:
 
     def __init__(
         self,
-        d_in: DeviceArrayLike | IteratorBase,
-        d_first_part_out: DeviceArrayLike | IteratorBase,
-        d_second_part_out: DeviceArrayLike | IteratorBase,
-        d_unselected_out: DeviceArrayLike | IteratorBase,
-        d_num_selected_out: DeviceArrayLike | IteratorBase,
+        d_in: DeviceArrayLike | IteratorProtocol,
+        d_first_part_out: DeviceArrayLike | IteratorProtocol,
+        d_second_part_out: DeviceArrayLike | IteratorProtocol,
+        d_unselected_out: DeviceArrayLike | IteratorProtocol,
+        d_num_selected_out: DeviceArrayLike | IteratorProtocol,
         select_first_part_op: OpAdapter,
         select_second_part_op: OpAdapter,
     ):
@@ -161,11 +161,11 @@ class _ThreeWayPartition:
 
 @cache_with_key(_make_cache_key)
 def _make_three_way_partition_cached(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_first_part_out: DeviceArrayLike | IteratorBase,
-    d_second_part_out: DeviceArrayLike | IteratorBase,
-    d_unselected_out: DeviceArrayLike | IteratorBase,
-    d_num_selected_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_first_part_out: DeviceArrayLike | IteratorProtocol,
+    d_second_part_out: DeviceArrayLike | IteratorProtocol,
+    d_unselected_out: DeviceArrayLike | IteratorProtocol,
+    d_num_selected_out: DeviceArrayLike | IteratorProtocol,
     select_first_part_op: OpAdapter,
     select_second_part_op: OpAdapter,
 ):
@@ -182,11 +182,11 @@ def _make_three_way_partition_cached(
 
 
 def make_three_way_partition(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_first_part_out: DeviceArrayLike | IteratorBase,
-    d_second_part_out: DeviceArrayLike | IteratorBase,
-    d_unselected_out: DeviceArrayLike | IteratorBase,
-    d_num_selected_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_first_part_out: DeviceArrayLike | IteratorProtocol,
+    d_second_part_out: DeviceArrayLike | IteratorProtocol,
+    d_unselected_out: DeviceArrayLike | IteratorProtocol,
+    d_num_selected_out: DeviceArrayLike | IteratorProtocol,
     select_first_part_op: Callable | OpAdapter,
     select_second_part_op: Callable | OpAdapter,
 ):
@@ -229,11 +229,11 @@ def make_three_way_partition(
 
 
 def three_way_partition(
-    d_in: DeviceArrayLike | IteratorBase,
-    d_first_part_out: DeviceArrayLike | IteratorBase,
-    d_second_part_out: DeviceArrayLike | IteratorBase,
-    d_unselected_out: DeviceArrayLike | IteratorBase,
-    d_num_selected_out: DeviceArrayLike | IteratorBase,
+    d_in: DeviceArrayLike | IteratorProtocol,
+    d_first_part_out: DeviceArrayLike | IteratorProtocol,
+    d_second_part_out: DeviceArrayLike | IteratorProtocol,
+    d_unselected_out: DeviceArrayLike | IteratorProtocol,
+    d_num_selected_out: DeviceArrayLike | IteratorProtocol,
     select_first_part_op: Callable,
     select_second_part_op: Callable,
     num_items: int,

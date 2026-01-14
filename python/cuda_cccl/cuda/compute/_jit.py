@@ -58,6 +58,14 @@ def _type_descriptor_to_numba(td: TypeDescriptor):
         if td.name == "complex128":
             return types.complex128
 
+        # Structured types: look up the originating dtype and build gpu_struct
+        from ._types import dtype_from_type_descriptor
+        from .struct import gpu_struct
+
+        dtype = dtype_from_type_descriptor(td)
+        if dtype is not None:
+            return as_numba_type(gpu_struct(dtype))
+
     # For STORAGE types (structs), conversion requires gpu_struct registration
     raise ValueError(
         f"Cannot convert TypeDescriptor({td.name}) to internal type. "
@@ -160,26 +168,18 @@ def compile_jit_op(
                     break
 
         if all_annotated:
-            internal_input_types = []
+            internal_input_types_list = []
             for i, param in enumerate(params):
                 if param.annotation != inspect.Parameter.empty:
-                    internal_input_types.append(as_numba_type(param.annotation))
+                    internal_input_types_list.append(as_numba_type(param.annotation))
                 elif i < len(input_types):
-                    internal_input_types.append(_to_internal_type(input_types[i]))
-            internal_input_types = tuple(internal_input_types)
+                    internal_input_types_list.append(_to_internal_type(input_types[i]))
+            internal_input_types = tuple(internal_input_types_list)
         else:
-            # For ZipIterator tuples and other dynamic struct types,
-            # we need to create a compatible Numba struct type from the TypeDescriptor
-
-            internal_input_types = []
-            for t in input_types:
-                if _is_struct_type_descriptor(t):
-                    # Create a Numba UniTuple or Record type based on the struct
-                    # For zip2 etc, use a generic approach based on size
-                    internal_input_types.append(_create_numba_struct_type(t))
-                else:
-                    internal_input_types.append(_to_internal_type(t))
-            internal_input_types = tuple(internal_input_types)
+            raise ValueError(
+                "Struct parameters require explicit type annotations "
+                "to compile with Numba."
+            )
     else:
         # Convert input types to internal representation normally
         internal_input_types = tuple(_to_internal_type(t) for t in input_types)

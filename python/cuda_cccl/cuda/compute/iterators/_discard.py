@@ -23,6 +23,10 @@ def _get_value_type(arg) -> TypeDescriptor:
         return uint8
     if isinstance(arg, TypeDescriptor):
         return arg
+    if hasattr(arg, "value_type"):
+        value_type = getattr(arg, "value_type")
+        if isinstance(value_type, TypeDescriptor):
+            return value_type
     # Assume it's an array-like, get dtype
     try:
         dtype = get_dtype(arg)
@@ -62,6 +66,7 @@ class DiscardIterator(IteratorBase):
 
         source = f"""
 #include <cuda/std/cstdint>
+#include <cuda_fp16.h>
 using namespace cuda::std;
 
 extern "C" __device__ void {symbol}(void* state, void* offset) {{
