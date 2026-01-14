@@ -10,6 +10,7 @@ C++ code generation, replacing the Numba-based implementations.
 """
 
 from ._base import CompiledIterator, IteratorBase
+from ._composite import ReverseIterator, TransformIterator
 from ._protocol import IteratorProtocol
 from ._simple import ConstantIterator, CountingIterator, DiscardIterator
 
@@ -20,4 +21,6 @@ __all__ = [
     "DiscardIterator",
     "IteratorBase",
     "IteratorProtocol",
+    "ReverseIterator",
+    "TransformIterator",
 ]
