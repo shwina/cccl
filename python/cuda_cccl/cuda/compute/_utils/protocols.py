@@ -7,11 +7,14 @@
 Utilities for extracting information from protocols such as `__cuda_array_interface__` and `__cuda_stream__`.
 """
 
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import numpy as np
 
 from ..typing import DeviceArrayLike, GpuStruct
+
+if TYPE_CHECKING:
+    from ..iterators._protocol import IteratorProtocol
 
 
 def get_data_pointer(arr: DeviceArrayLike) -> int:
@@ -34,7 +37,9 @@ def get_data_pointer(arr: DeviceArrayLike) -> int:
     return arr.__cuda_array_interface__["data"][0]
 
 
-def get_dtype(arr: DeviceArrayLike | GpuStruct | np.ndarray) -> np.dtype:
+def get_dtype(
+    arr: DeviceArrayLike | GpuStruct | np.ndarray | "IteratorProtocol",
+) -> np.dtype:
     # Try the fast path via .dtype attribute (works for np.ndarray, GpuStruct, and most device arrays)
     try:
         return np.dtype(arr.dtype)  # type: ignore
