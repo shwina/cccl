@@ -167,8 +167,10 @@ typedef enum cccl_determinism_t
 
 typedef enum cccl_binary_search_mode_t
 {
-  CCCL_BINARY_SEARCH_LOWER_BOUND = 0,
-  CCCL_BINARY_SEARCH_UPPER_BOUND = 1,
+  CCCL_BINARY_SEARCH_LOWER_BOUND       = 0,
+  CCCL_BINARY_SEARCH_UPPER_BOUND       = 1,
+  CCCL_BINARY_SEARCH_LOWER_BOUND_INDEX = 2,
+  CCCL_BINARY_SEARCH_UPPER_BOUND_INDEX = 3,
 } cccl_binary_search_mode_t;
 
 CCCL_C_EXTERN_C_END

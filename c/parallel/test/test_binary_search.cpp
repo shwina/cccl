@@ -35,6 +35,10 @@ static std::string mode_as_key(cccl_binary_search_mode_t mode)
       return "LOWER";
     case cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_UPPER_BOUND:
       return "UPPER";
+    case cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_LOWER_BOUND_INDEX:
+      return "LOWER_INDEX";
+    case cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_UPPER_BOUND_INDEX:
+      return "UPPER_INDEX";
   }
 
   throw std::runtime_error("Invalid binary search mode");
@@ -114,8 +118,10 @@ struct binary_search_wrapper
   }
 };
 
-using lower_bound = binary_search_wrapper<cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_LOWER_BOUND>;
-using upper_bound = binary_search_wrapper<cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_UPPER_BOUND>;
+using lower_bound       = binary_search_wrapper<cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_LOWER_BOUND>;
+using upper_bound       = binary_search_wrapper<cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_UPPER_BOUND>;
+using lower_bound_index = binary_search_wrapper<cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_LOWER_BOUND_INDEX>;
+using upper_bound_index = binary_search_wrapper<cccl_binary_search_mode_t::CCCL_BINARY_SEARCH_UPPER_BOUND_INDEX>;
 
 // ==============
 //   Test section
@@ -190,4 +196,53 @@ C2H_TEST("DeviceFind::UpperBound works", "[find][device][binary-search]", integr
 {
   using value_type = c2h::get<0, TestType>;
   test_vectorized<BinarySearch_IntegralTypes_UpperBound_Fixture_Tag, value_type>(upper_bound{}, std_upper_bound);
+}
+
+// Test function for index output modes (returns indices instead of pointers)
+template <typename Fixture, typename Value, typename Variant, typename HostVariant>
+void test_vectorized_index(Variant variant, HostVariant host_variant)
+{
+  const std::size_t num_items = GENERATE(0, 43, take(4, random(1 << 12, 1 << 16)));
+  operation_t op              = make_operation("op", get_merge_sort_op(get_type_info<Value>().type));
+
+  const std::vector<Value> target_values = generate<Value>(num_items / 100);
+  std::vector<Value> data                = generate<Value>(num_items);
+  std::copy(target_values.begin(), target_values.end(), data.begin());
+  std::sort(data.begin(), data.end());
+  const std::vector<std::size_t> output(target_values.size(), 0);
+
+  pointer_t<Value> target_values_ptr(target_values);
+  pointer_t<Value> data_ptr(data);
+  pointer_t<std::size_t> output_ptr(output);
+
+  auto& build_cache    = get_cache<Fixture>();
+  const auto& test_key = make_binary_search_key<Value>(true, Variant::mode);
+
+  variant(data_ptr, num_items, target_values_ptr, target_values.size(), output_ptr, op, build_cache, test_key);
+
+  std::vector<std::size_t> results(output_ptr);
+  std::vector<std::size_t> expected(target_values.size(), 0);
+
+  for (auto i = 0u; i < target_values.size(); ++i)
+  {
+    expected[i] = host_variant(data.data(), data.data() + num_items, target_values[i], std::less<>()) - data.data();
+  }
+
+  CHECK(expected == results);
+}
+
+struct BinarySearch_IntegralTypes_LowerBoundIndex_Fixture_Tag;
+C2H_TEST("DeviceFind::LowerBound index mode works", "[find][device][binary-search][index]", integral_types)
+{
+  using value_type = c2h::get<0, TestType>;
+  test_vectorized_index<BinarySearch_IntegralTypes_LowerBoundIndex_Fixture_Tag, value_type>(
+    lower_bound_index{}, std_lower_bound);
+}
+
+struct BinarySearch_IntegralTypes_UpperBoundIndex_Fixture_Tag;
+C2H_TEST("DeviceFind::UpperBound index mode works", "[find][device][binary-search][index]", integral_types)
+{
+  using value_type = c2h::get<0, TestType>;
+  test_vectorized_index<BinarySearch_IntegralTypes_UpperBoundIndex_Fixture_Tag, value_type>(
+    upper_bound_index{}, std_upper_bound);
 }

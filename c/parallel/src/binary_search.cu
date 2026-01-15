@@ -113,6 +113,11 @@ try
   auto [op_name, op_src] =
     get_specialization<binary_search_op_tag>(template_id<binary_user_predicate_traits>(), op, d_data.value_type);
 
+  const bool is_index_mode =
+    (mode == CCCL_BINARY_SEARCH_LOWER_BOUND_INDEX || mode == CCCL_BINARY_SEARCH_UPPER_BOUND_INDEX);
+
+  // For index modes, we use locally-defined structs that return indices instead of iterators.
+  // This avoids modifying the CUB library.
   const std::string mode_t = [&] {
     switch (mode)
     {
@@ -120,9 +125,76 @@ try
         return "cub::detail::find::lower_bound";
       case CCCL_BINARY_SEARCH_UPPER_BOUND:
         return "cub::detail::find::upper_bound";
+      case CCCL_BINARY_SEARCH_LOWER_BOUND_INDEX:
+        return "lower_bound_index";
+      case CCCL_BINARY_SEARCH_UPPER_BOUND_INDEX:
+        return "upper_bound_index";
     }
     throw std::runtime_error(std::format("Invalid binary search mode ({})", static_cast<int>(mode)));
   }();
+
+  // Index-returning struct definitions for JIT compilation (only included when needed)
+  const std::string index_mode_structs =
+    is_index_mode ? R"XXX(
+// Index-returning variants that compute (result - first) directly
+struct lower_bound_index
+{
+  template <typename RangeIteratorT, typename T, typename CompareOpT>
+  __device__ __forceinline__ static auto
+  Invoke(RangeIteratorT first, RangeIteratorT last, const T& value, CompareOpT comp)
+  {
+    return cuda::std::lower_bound(first, last, value, comp) - first;
+  }
+};
+
+struct upper_bound_index
+{
+  template <typename RangeIteratorT, typename T, typename CompareOpT>
+  __device__ __forceinline__ static auto
+  Invoke(RangeIteratorT first, RangeIteratorT last, const T& value, CompareOpT comp)
+  {
+    return cuda::std::upper_bound(first, last, value, comp) - first;
+  }
+};
+)XXX"
+                  : "";
+
+  // For index mode, we write indices directly to output (no pointer casting needed).
+  // For iterator mode, we need to cast the output to match the data pointer type.
+  const std::string kernel_body =
+    is_index_mode
+      ? std::format(R"XXX(
+  auto input_it     = cuda::make_zip_iterator(d_values, d_out);
+  auto comp_wrapper = cub::detail::find::make_comp_wrapper<{0}>(d_data, d_data + num_data, op);
+  auto agent_op     = [&comp_wrapper, &input_it](OffsetT index) {{
+    comp_wrapper(input_it[index]);
+  }};
+)XXX",
+                    mode_t)
+      : std::format(R"XXX(
+  auto d_out_typed = [&] {{
+    constexpr auto out_is_ptr = cuda::std::is_pointer_v<decltype(d_out)>;
+    constexpr auto out_matches_items = cuda::std::is_same_v<decltype(*d_out), decltype(d_data)>;
+    constexpr auto need_cast = out_is_ptr && !out_matches_items;
+
+    if constexpr (need_cast) {{
+      static_assert(sizeof(decltype(*d_out)) == sizeof(decltype(d_data)), "");
+      static_assert(alignof(decltype(*d_out)) == alignof(decltype(d_data)), "");
+      return reinterpret_cast<{0} *>(d_out);
+    }}
+    else {{
+      return d_out;
+    }}
+  }}();
+
+  auto input_it     = cuda::make_zip_iterator(d_values, d_out_typed);
+  auto comp_wrapper = cub::detail::find::make_comp_wrapper<{1}>(d_data, d_data + num_data, op);
+  auto agent_op     = [&comp_wrapper, &input_it](OffsetT index) {{
+    comp_wrapper(input_it[index]);
+  }};
+)XXX",
+                    d_data_it_name,
+                    mode_t);
 
   const std::string src = std::format(
     R"XXX(
@@ -141,6 +213,8 @@ struct __align__({10}) storage_t {{
 {4}
 {6}
 
+{13}
+
 using policy_dim_t = cub::detail::for_each::policy_t<256, 2>;
 using OffsetT = cuda::std::size_t;
 
@@ -156,27 +230,7 @@ CUB_DETAIL_KERNEL_ATTRIBUTES
 __launch_bounds__(device_for_policy::ActivePolicy::for_policy_t::block_threads)
 void binary_search_kernel({1} d_data, OffsetT num_data, {3} d_values, OffsetT num_values, {5} d_out, {7} op)
 {{
-  auto d_out_typed = [&] {{
-    constexpr auto out_is_ptr = cuda::std::is_pointer_v<decltype(d_out)>;
-    constexpr auto out_matches_items = cuda::std::is_same_v<decltype(*d_out), decltype(d_data)>;
-    constexpr auto need_cast = out_is_ptr && !out_matches_items;
-
-    if constexpr (need_cast) {{
-      static_assert(sizeof(decltype(*d_out)) == sizeof(decltype(d_data)), "");
-      static_assert(alignof(decltype(*d_out)) == alignof(decltype(d_data)), "");
-      return reinterpret_cast<{1} *>(d_out);
-    }}
-    else {{
-      return d_out;
-    }}
-  }}();
-
-  auto input_it     = cuda::make_zip_iterator(d_values, d_out_typed);
-  auto comp_wrapper = cub::detail::find::make_comp_wrapper<{8}>(d_data, d_data + num_data, op);
-  auto agent_op     = [&comp_wrapper, &input_it](OffsetT index) {{
-    comp_wrapper(input_it[index]);
-  }};
-
+{12}
   using active_policy_t = device_for_policy::ActivePolicy::for_policy_t;
   using agent_t         = cub::detail::for_each::agent_block_striped_t<active_policy_t, OffsetT, decltype(agent_op)>;
 
@@ -208,7 +262,9 @@ void binary_search_kernel({1} d_data, OffsetT num_data, {3} d_values, OffsetT nu
     mode_t,
     d_out.value_type.size,
     d_out.value_type.alignment,
-    jit_template_header_contents);
+    jit_template_header_contents,
+    kernel_body,
+    index_mode_structs);
 
   const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
 
