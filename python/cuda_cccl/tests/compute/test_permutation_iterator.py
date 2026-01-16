@@ -144,9 +144,7 @@ def test_caching_permutation_iterator():
     it2 = PermutationIterator(
         cp.arange(10, dtype=np.int32), cp.arange(10, dtype=np.int32)
     )
-    assert it1.advance is it2.advance
-    assert it1.input_dereference is it2.input_dereference
-    assert it1.output_dereference is it2.output_dereference
+    assert it1.kind == it2.kind
 
     # same value type, different index types:
     it1 = PermutationIterator(
@@ -155,9 +153,7 @@ def test_caching_permutation_iterator():
     it2 = PermutationIterator(
         cp.arange(10, dtype=np.int32), cp.arange(10, dtype=np.int64)
     )
-    assert it1.advance is not it2.advance
-    assert it1.input_dereference is not it2.input_dereference
-    assert it1.output_dereference is not it2.output_dereference
+    assert it1.kind != it2.kind
 
     # different value types, same index type:
     it1 = PermutationIterator(
@@ -166,9 +162,7 @@ def test_caching_permutation_iterator():
     it2 = PermutationIterator(
         cp.arange(10, dtype=np.int64), cp.arange(10, dtype=np.int32)
     )
-    assert it1.advance is not it2.advance
-    assert it1.input_dereference is not it2.input_dereference
-    assert it1.output_dereference is not it2.output_dereference
+    assert it1.kind != it2.kind
 
     # permutation iterator with transform iterator value type (same op):
     def op(x):
@@ -182,9 +176,7 @@ def test_caching_permutation_iterator():
         TransformIterator(cp.arange(10, dtype=np.int32), op),
         cp.arange(10, dtype=np.int32),
     )
-    assert it1.advance is it2.advance
-    assert it1.input_dereference is it2.input_dereference
-    assert it1.output_dereference is it2.output_dereference
+    assert it1.kind == it2.kind
 
     # permutation iterator with transform iterator value type (different op):
     def op2(x):
@@ -198,6 +190,4 @@ def test_caching_permutation_iterator():
         TransformIterator(cp.arange(10, dtype=np.int32), op2),
         cp.arange(10, dtype=np.int32),
     )
-    assert it1.advance is not it2.advance
-    assert it1.input_dereference is not it2.input_dereference
-    assert it1.output_dereference is not it2.output_dereference
+    assert it1.kind != it2.kind
