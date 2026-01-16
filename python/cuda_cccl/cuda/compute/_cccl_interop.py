@@ -4,13 +4,12 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 from __future__ import annotations
 
-import enum
 import functools
 import os
 import subprocess
 import tempfile
 import warnings
-from typing import TYPE_CHECKING, Callable, List
+from typing import TYPE_CHECKING, Any, Callable, List, Protocol, TypeGuard
 
 import numba
 import numpy as np
@@ -41,7 +40,6 @@ from ._bindings import (
     make_pointer_object,
 )
 from ._utils.protocols import get_data_pointer, get_dtype, is_contiguous
-from .iterators._iterators import IteratorBase
 from .op import OpKind
 from .typing import DeviceArrayLike, GpuStruct
 
@@ -63,11 +61,27 @@ _TYPE_TO_ENUM = {
 if TYPE_CHECKING:
     from numba.core.typing import Signature
 
+    class IteratorProtocol(Protocol):
+        kind: object
+
+        def to_cccl_iter(self, *, is_output: bool) -> Any: ...
+
 
 def _type_to_enum(numba_type: types.Type) -> TypeEnum:
     if numba_type in _TYPE_TO_ENUM:
         return _TYPE_TO_ENUM[numba_type]
     return TypeEnum.STORAGE
+
+
+@functools.lru_cache(maxsize=1)
+def _legacy_iterators_available() -> bool:
+    import importlib.util
+
+    # Prefer legacy if it's present in the active package.
+    if importlib.util.find_spec("cuda.compute.iterators._iterators") is not None:
+        return True
+    # Otherwise, check for the new iterator implementation.
+    return importlib.util.find_spec("cuda.compute.iterators._base") is None
 
 
 # TODO: replace with functools.cache once our docs build environment
@@ -141,12 +155,18 @@ def type_enum_as_name(enum_value: int) -> str:
     )[enum_value]
 
 
-class _IteratorIO(enum.Enum):
-    INPUT = 0
-    OUTPUT = 1
+def is_iterator(obj: object) -> TypeGuard["IteratorProtocol"]:
+    """Check if an object is an iterator (protocol or IteratorBase)."""
+    if hasattr(obj, "to_cccl_iter") and callable(obj.to_cccl_iter):
+        return True
+    try:
+        from .iterators._iterators import IteratorBase
+    except Exception:
+        return False
+    return isinstance(obj, IteratorBase)
 
 
-def _iterator_to_cccl_iter(it: IteratorBase, io_kind: _IteratorIO) -> Iterator:
+def _iterator_to_cccl_iter(it, is_output: bool) -> Iterator:
     context = cuda.descriptor.cuda_target.target_context
     state_ptr_type = it.state_ptr_type
     state_type = it.state_type
@@ -162,13 +182,10 @@ def _iterator_to_cccl_iter(it: IteratorBase, io_kind: _IteratorIO) -> Iterator:
     )
 
     advance_abi_name, advance_ltoir = it.get_advance_ltoir()
-    match io_kind:
-        case _IteratorIO.INPUT:
-            deref_abi_name, deref_ltoir = it.get_input_dereference_ltoir()
-        case _IteratorIO.OUTPUT:
-            deref_abi_name, deref_ltoir = it.get_output_dereference_ltoir()
-        case _:
-            raise ValueError(f"Invalid io_kind: {io_kind}")
+    if is_output:
+        deref_abi_name, deref_ltoir = it.get_output_dereference_ltoir()
+    else:
+        deref_abi_name, deref_ltoir = it.get_input_dereference_ltoir()
 
     advance_op = Op(
         operator_type=OpKind.STATELESS,
@@ -190,22 +207,30 @@ def _iterator_to_cccl_iter(it: IteratorBase, io_kind: _IteratorIO) -> Iterator:
     )
 
 
-def _to_cccl_iter(
-    it: IteratorBase | DeviceArrayLike | None, io_kind: _IteratorIO
-) -> Iterator:
+def get_iterator_kind(it):
+    """Get the cache key kind from an iterator."""
+    return it.kind
+
+
+def _to_cccl_iter(it, is_output: bool) -> Iterator:
+    """Convert an iterator or array to a CCCL Iterator."""
     if it is None:
         return _none_to_cccl_iter()
-    if isinstance(it, IteratorBase):
-        return _iterator_to_cccl_iter(it, io_kind)
+    # Iterator protocol / IteratorBase
+    if is_iterator(it):
+        if hasattr(it, "to_cccl_iter") and callable(it.to_cccl_iter):
+            return it.to_cccl_iter(is_output=is_output)
+        return _iterator_to_cccl_iter(it, is_output=is_output)
+    # Device array
     return _device_array_to_cccl_iter(it)
 
 
 def to_cccl_input_iter(array_or_iterator) -> Iterator:
-    return _to_cccl_iter(array_or_iterator, _IteratorIO.INPUT)
+    return _to_cccl_iter(array_or_iterator, is_output=False)
 
 
 def to_cccl_output_iter(array_or_iterator) -> Iterator:
-    return _to_cccl_iter(array_or_iterator, _IteratorIO.OUTPUT)
+    return _to_cccl_iter(array_or_iterator, is_output=True)
 
 
 def to_cccl_value_state(array_or_struct: np.ndarray | GpuStruct) -> memoryview:
@@ -242,21 +267,59 @@ def to_stateless_cccl_op(op, sig: "Signature") -> Op:
     )
 
 
-def get_value_type(d_in: IteratorBase | DeviceArrayLike | GpuStruct | np.ndarray):
+class ZipValueType:
+    """
+    Special type for ZipIterator values that includes component types.
+
+    This enables Numba to create a Tuple type for user-defined operations
+    that access individual elements via indexing (pair[0], pair[1]).
+    """
+
+    def __init__(self, value_type, component_types):
+        self.value_type = value_type
+        self.component_types = component_types
+
+
+def get_value_type(d_in):
+    """
+    Get the value type for an input array, iterator, or struct.
+
+    Returns:
+        - For ZipIterator: ZipValueType (enables Numba Tuple conversion)
+        - For other iterators (with to_cccl_iter): their value_type (TypeDescriptor)
+        - For _Struct instances: the struct class itself
+        - For arrays with structured dtype: an anonymous gpu_struct class
+        - For arrays with scalar dtype: a TypeDescriptor
+    """
+    from ._types import from_numpy_dtype
     from .struct import _Struct, gpu_struct
 
-    if isinstance(d_in, IteratorBase):
+    # Iterator protocol - returns TypeDescriptor or ZipValueType
+    if is_iterator(d_in):
+        if hasattr(d_in, "value_type"):
+            return d_in.value_type
+        # ZipIterator returns ZipValueType for Numba Tuple conversion
+        if hasattr(d_in, "_component_types") and d_in._component_types is not None:
+            return ZipValueType(d_in.value_type, d_in._component_types)
         return d_in.value_type
+
+    # Struct instances - return the class
     if isinstance(d_in, _Struct):
-        return numba.typeof(d_in)
+        return d_in.__class__
+
+    # Arrays - check dtype
     dtype = get_dtype(d_in)
-    if dtype.type == np.void:
-        # we can't use the numba type corresponding to numpy struct
-        # types directly, as those are passed by pointer to device
-        # functions. Instead, we create an anonymous struct type
-        # which has the appropriate pass-by-value semantics.
-        return as_numba_type(gpu_struct(dtype))
-    return numba.from_dtype(dtype)
+
+    # Structured dtype handling differs between legacy and new iterator layouts
+    if dtype.fields is not None:
+        if _legacy_iterators_available():
+            return as_numba_type(gpu_struct(dtype))
+        return gpu_struct(dtype)
+
+    # Scalar dtype
+    if _legacy_iterators_available():
+        return numba.from_dtype(dtype)
+    return from_numpy_dtype(dtype)
 
 
 def set_cccl_iterator_state(cccl_it: Iterator, input_it):
