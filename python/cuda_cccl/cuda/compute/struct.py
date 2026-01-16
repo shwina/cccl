@@ -83,6 +83,9 @@ from numba.core.typing.templates import AttributeTemplate, ConcreteTemplate
 from numba.cuda.cudadecl import registry as cuda_registry
 from numba.extending import as_numba_type, lower_builtin, lower_cast
 
+# Track struct classes by dtype to reuse them across conversions.
+_STRUCT_CLASS_BY_DTYPE: dict[np.dtype, "type[_Struct]"] = {}
+
 
 def gpu_struct(field_dict: Union[dict, np.dtype, type], name: str = "AnonymousStruct"):
     """
@@ -454,14 +457,17 @@ def _patch_struct_class(struct_class):
 
     struct_class.__init__ = __init__
     struct_class.dtype = _as_numpy_record_dtype(struct_class)
+    _STRUCT_CLASS_BY_DTYPE[struct_class.dtype] = struct_class
 
 
-def _from_numpy_record_dtype(dtype: np.dtype) -> Union[_Struct, np.dtype]:
+def _from_numpy_record_dtype(dtype: np.dtype) -> Union["type[_Struct]", np.dtype]:
     """Convert a numpy record dtype to a gpu_struct type."""
     if dtype.type != np.void:
         return dtype
     if dtype.fields is None:
         return dtype
+    if dtype in _STRUCT_CLASS_BY_DTYPE:
+        return _STRUCT_CLASS_BY_DTYPE[dtype]
     return gpu_struct(
         {
             name: _from_numpy_record_dtype(field_info[0])
