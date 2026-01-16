@@ -155,31 +155,22 @@ def compile_jit_op(
     has_unconvertible_struct = any(_is_struct_type_descriptor(t) for t in input_types)
 
     if has_unconvertible_struct:
-        # Try to get types from function annotations
+        # Try annotations first, then fall back to type descriptors if possible.
         sig_obj = inspect.signature(func)
         params = list(sig_obj.parameters.values())
-
-        # Check if all struct parameters have annotations
-        all_annotated = True
+        internal_input_types_list = []
         for i, param in enumerate(params):
-            if i < len(input_types) and _is_struct_type_descriptor(input_types[i]):
-                if param.annotation == inspect.Parameter.empty:
-                    all_annotated = False
-                    break
-
-        if all_annotated:
-            internal_input_types_list = []
-            for i, param in enumerate(params):
-                if param.annotation != inspect.Parameter.empty:
-                    internal_input_types_list.append(as_numba_type(param.annotation))
-                elif i < len(input_types):
+            if param.annotation != inspect.Parameter.empty:
+                internal_input_types_list.append(as_numba_type(param.annotation))
+            elif i < len(input_types):
+                try:
                     internal_input_types_list.append(_to_internal_type(input_types[i]))
-            internal_input_types = tuple(internal_input_types_list)
-        else:
-            raise ValueError(
-                "Struct parameters require explicit type annotations "
-                "to compile with Numba."
-            )
+                except Exception as exc:  # pragma: no cover - rare fallback
+                    raise ValueError(
+                        "Struct parameters require explicit type annotations "
+                        "to compile with Numba."
+                    ) from exc
+        internal_input_types = tuple(internal_input_types_list)
     else:
         # Convert input types to internal representation normally
         internal_input_types = tuple(_to_internal_type(t) for t in input_types)
