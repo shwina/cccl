@@ -12,15 +12,14 @@ import cupy as cp
 import numpy as np
 
 import cuda.compute
-from cuda.compute import (
-    CountingIterator,
-    ZipIterator,
-)
+from cuda.compute import CountingIterator, ZipIterator, gpu_struct
+
+IndexValue = gpu_struct({"index": np.int32, "value": np.int32}, name="IndexValue")
 
 
-def max_by_value(p1, p2):
+def max_by_value(p1: IndexValue, p2: IndexValue) -> IndexValue:
     """Reduction operation that returns the pair with the larger value."""
-    return p1 if p1[1] > p2[1] else p2
+    return p1 if p1.value > p2.value else p2
 
 
 # Create the counting iterator.
@@ -35,10 +34,9 @@ zip_it = ZipIterator(counting_it, arr)
 num_items = 8
 
 # Note: initial value passed as a numpy struct
-dtype = np.dtype([("index", np.int32), ("value", np.int32)], align=True)
-h_init = np.asarray([(-1, -1)], dtype=dtype)
+h_init = np.asarray([(-1, -1)], dtype=IndexValue.dtype)
 
-d_output = cp.empty(1, dtype=dtype)
+d_output = cp.empty(1, dtype=IndexValue.dtype)
 
 # Perform the reduction.
 cuda.compute.reduce_into(zip_it, d_output, max_by_value, num_items, h_init)

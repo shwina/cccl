@@ -186,7 +186,16 @@ def compile_jit_op(
 
     # Determine output type
     if output_type is not None:
-        internal_output_type = _to_internal_type(output_type)
+        # Prefer explicit return annotations for struct outputs to avoid
+        # anonymous struct mismatches.
+        if _is_struct_type_descriptor(output_type):
+            try:
+                sig = signature_from_annotations(func)
+                internal_output_type = sig.return_type
+            except ValueError:
+                internal_output_type = _to_internal_type(output_type)
+        else:
+            internal_output_type = _to_internal_type(output_type)
     else:
         # Try annotations first
         try:

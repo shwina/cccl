@@ -54,7 +54,7 @@ def add_op(v1: ValueScale, v2: ValueScale) -> ValueScale:
     return ValueScale(v, s)
 
 
-def negative_op(i: cp.int64) -> cp.int64:
+def negative_op(i: int) -> int:
     return -i
 
 
@@ -71,7 +71,7 @@ it_seq = CountingIterator(cp.int64(0))
 d_ema = cp.empty_like(u)
 
 
-def combine_op(v: ValueScale, t: cp.int64) -> cp.float64:
+def combine_op(v: ValueScale, t: int) -> float:
     return (1 - alpha) * v.value * alpha ** (t + v.scale)
 
 

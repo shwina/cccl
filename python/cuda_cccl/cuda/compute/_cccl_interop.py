@@ -11,10 +11,7 @@ import tempfile
 import warnings
 from typing import TYPE_CHECKING, Callable, List, TypeGuard
 
-import numba
 import numpy as np
-from numba import cuda, types
-from numba.core.extending import as_numba_type
 
 # TODO: adding a type-ignore here because `cuda` being a
 # namespace package confuses mypy when `cuda.<something_else>`
@@ -26,6 +23,7 @@ from numba.core.extending import as_numba_type
 #
 # We need to find a better solution for this.
 from cuda.cccl import get_include_paths  # type: ignore
+from cuda.core import Device
 
 from ._bindings import (
     CommonData,
@@ -34,61 +32,22 @@ from ._bindings import (
     IteratorState,
     Op,
     Pointer,
-    TypeEnum,
     TypeInfo,
     Value,
     make_pointer_object,
 )
+from ._types import from_numpy_dtype
 from ._utils.protocols import get_data_pointer, get_dtype, is_contiguous
-from .op import OpKind
 from .typing import DeviceArrayLike, GpuStruct
 
-_TYPE_TO_ENUM = {
-    types.int8: TypeEnum.INT8,
-    types.int16: TypeEnum.INT16,
-    types.int32: TypeEnum.INT32,
-    types.int64: TypeEnum.INT64,
-    types.uint8: TypeEnum.UINT8,
-    types.uint16: TypeEnum.UINT16,
-    types.uint32: TypeEnum.UINT32,
-    types.uint64: TypeEnum.UINT64,
-    types.float16: TypeEnum.FLOAT16,
-    types.float32: TypeEnum.FLOAT32,
-    types.float64: TypeEnum.FLOAT64,
-}
-
-
 if TYPE_CHECKING:
-    from numba.core.typing import Signature
-
     from .iterators._protocol import IteratorProtocol
-
-
-def _type_to_enum(numba_type: types.Type) -> TypeEnum:
-    if numba_type in _TYPE_TO_ENUM:
-        return _TYPE_TO_ENUM[numba_type]
-    return TypeEnum.STORAGE
-
-
-# TODO: replace with functools.cache once our docs build environment
-# is upgraded to at least Python 3.9
-@functools.lru_cache(maxsize=None)
-def _numba_type_to_info(numba_type: types.Type) -> TypeInfo:
-    context = cuda.descriptor.cuda_target.target_context
-    value_type = context.get_value_type(numba_type)
-    if isinstance(numba_type, types.Record):
-        # then `value_type` is a pointer and we need the
-        # alignment of the pointee.
-        value_type = value_type.pointee
-    size = value_type.get_abi_size(context.target_data)
-    alignment = value_type.get_abi_alignment(context.target_data)
-    return TypeInfo(size, alignment, _type_to_enum(numba_type))
 
 
 @functools.lru_cache(maxsize=None)
 def _numpy_type_to_info(numpy_type: np.dtype) -> TypeInfo:
-    numba_type = numba.from_dtype(numpy_type)
-    return _numba_type_to_info(numba_type)
+    type_desc = from_numpy_dtype(numpy_type)
+    return type_desc.to_type_info()
 
 
 def _device_array_to_cccl_iter(array: DeviceArrayLike) -> Iterator:
@@ -96,16 +55,9 @@ def _device_array_to_cccl_iter(array: DeviceArrayLike) -> Iterator:
         raise ValueError("Non-contiguous arrays are not supported.")
     dtype = get_dtype(array)
 
-    # Handle structured dtypes by creating a proper gpu_struct
-    if dtype.type == np.void:
-        from .struct import gpu_struct
+    info = _numpy_type_to_info(dtype)
 
-        numba_type = as_numba_type(gpu_struct(dtype))
-        info = _numba_type_to_info(numba_type)
-    else:
-        info = _numpy_type_to_info(dtype)
-
-    state_info = _numpy_type_to_info(np.intp)
+    state_info = _numpy_type_to_info(np.dtype(np.intp))
     return Iterator(
         state_info.alignment,
         IteratorKind.POINTER,
@@ -189,21 +141,6 @@ def to_cccl_value(array_or_struct: np.ndarray | GpuStruct) -> Value:
         return to_cccl_value(array_or_struct._data)
 
 
-def to_stateless_cccl_op(op, sig: "Signature") -> Op:
-    from ._odr_helpers import create_op_void_ptr_wrapper
-
-    wrapped_op, wrapper_sig = create_op_void_ptr_wrapper(op, sig)
-
-    ltoir, _ = cuda.compile(wrapped_op, sig=wrapper_sig, output="ltoir")
-    return Op(
-        operator_type=OpKind.STATELESS,
-        name=wrapped_op.__name__,
-        ltoir=ltoir,
-        state_alignment=1,
-        state=None,
-    )
-
-
 class ZipValueType:
     """
     Special type for ZipIterator values that includes component types.
@@ -225,11 +162,11 @@ def get_value_type(d_in):
         - For ZipIterator: ZipValueType (enables Numba Tuple conversion)
         - For other iterators (with to_cccl_iter): their value_type (TypeDescriptor)
         - For _Struct instances: the struct class itself
-        - For arrays with structured dtype: an anonymous gpu_struct class
+        - For arrays with structured dtype: a TypeDescriptor
         - For arrays with scalar dtype: a TypeDescriptor
     """
     from ._types import from_numpy_dtype
-    from .struct import _Struct, gpu_struct
+    from .struct import _Struct
 
     # Iterator protocol - returns TypeDescriptor or ZipValueType
     if is_iterator(d_in):
@@ -245,9 +182,9 @@ def get_value_type(d_in):
     # Arrays - check dtype
     dtype = get_dtype(d_in)
 
-    # Structured dtype → create anonymous gpu_struct
+    # Structured dtype → return TypeDescriptor
     if dtype.fields is not None:
-        return gpu_struct(dtype)
+        return from_numpy_dtype(dtype)
 
     # Scalar dtype → return TypeDescriptor
     return from_numpy_dtype(dtype)
@@ -310,7 +247,9 @@ def call_build(build_impl_fn: Callable, *args, **kwargs):
     """
     global _check_sass
 
-    cc_major, cc_minor = cuda.get_current_device().compute_capability
+    device = Device()
+    device.set_current()
+    cc_major, cc_minor = device.compute_capability
     cub_path, thrust_path, libcudacxx_path, cuda_include_path = get_includes()
     common_data = CommonData(
         cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, cuda_include_path
@@ -327,22 +266,3 @@ def call_build(build_impl_fn: Callable, *args, **kwargs):
         os.unlink(temp_cubin_file_name)
 
     return result
-
-
-def _make_host_cfunc(state_ptr_ty, fn):
-    sig = numba.void(state_ptr_ty, numba.int64)
-    c_advance_fn = numba.cfunc(sig)(fn)
-
-    return c_advance_fn.ctypes
-
-
-def cccl_iterator_set_host_advance(cccl_it: Iterator, array_or_iterator):
-    if cccl_it.is_kind_iterator():
-        it = array_or_iterator
-        fn_impl = it.host_advance
-        if fn_impl is not None:
-            cccl_it.host_advance_fn = _make_host_cfunc(it.state_ptr_type, fn_impl)
-        else:
-            raise ValueError(
-                f"Iterator of type {type(it)} does not provide definition of host_advance function"
-            )

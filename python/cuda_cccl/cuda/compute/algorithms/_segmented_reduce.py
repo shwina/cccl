@@ -49,34 +49,6 @@ class _SegmentedReduce:
         self.d_out_cccl = cccl.to_cccl_output_iter(d_out)
         self.start_offsets_in_cccl = cccl.to_cccl_input_iter(start_offsets_in)
         self.end_offsets_in_cccl = cccl.to_cccl_input_iter(end_offsets_in)
-
-        # Host advance functions are optional; only wire them when explicitly provided.
-        if self.d_out_cccl.is_kind_iterator() and getattr(d_out, "host_advance", None):
-            cccl.cccl_iterator_set_host_advance(self.d_out_cccl, d_out)
-        if self.start_offsets_in_cccl.is_kind_iterator() and getattr(
-            start_offsets_in, "host_advance", None
-        ):
-            cccl.cccl_iterator_set_host_advance(
-                self.start_offsets_in_cccl, start_offsets_in
-            )
-        if (
-            self.start_offsets_in_cccl.is_kind_iterator()
-            and self.end_offsets_in_cccl.is_kind_iterator()
-            and is_iterator(start_offsets_in)
-            and is_iterator(end_offsets_in)
-            and get_iterator_kind(start_offsets_in) == get_iterator_kind(end_offsets_in)
-            and self.start_offsets_in_cccl.host_advance_fn is not None
-        ):
-            self.end_offsets_in_cccl.host_advance_fn = (
-                self.start_offsets_in_cccl.host_advance_fn
-            )
-        elif self.end_offsets_in_cccl.is_kind_iterator() and getattr(
-            end_offsets_in, "host_advance", None
-        ):
-            cccl.cccl_iterator_set_host_advance(
-                self.end_offsets_in_cccl, end_offsets_in
-            )
-
         self.h_init_cccl = cccl.to_cccl_value(h_init)
 
         # Compile the op with value types

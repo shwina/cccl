@@ -31,9 +31,9 @@ class _UnaryTransform:
         # Compile the op with input/output types
         in_type = cccl.get_value_type(d_in)
         out_type = cccl.get_value_type(d_out)
-        # For struct types (class-like), let Numba infer the return type
-        # to avoid anonymous struct type mismatch
-        if not isinstance(out_type, TypeDescriptor):
+        # For struct outputs, let Numba infer the return type to avoid
+        # anonymous struct type mismatch.
+        if isinstance(out_type, TypeDescriptor) and out_type.name.startswith("struct("):
             out_type = None
         self.op_cccl = op.compile((in_type,), out_type)
 
@@ -90,9 +90,9 @@ class _BinaryTransform:
         in1_type = cccl.get_value_type(d_in1)
         in2_type = cccl.get_value_type(d_in2)
         out_type = cccl.get_value_type(d_out)
-        # For struct types (class-like), let Numba infer the return type
-        # to avoid anonymous struct type mismatch
-        if not isinstance(out_type, TypeDescriptor):
+        # For struct outputs, let Numba infer the return type to avoid
+        # anonymous struct type mismatch.
+        if isinstance(out_type, TypeDescriptor) and out_type.name.startswith("struct("):
             out_type = None
         self.op_cccl = op.compile((in1_type, in2_type), out_type)
 

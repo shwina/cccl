@@ -13,6 +13,7 @@ from ..._utils.protocols import (
     validate_and_get_stream,
 )
 from ..._utils.temp_storage_buffer import TempStorageBuffer
+from ...op import OpKind
 from ...typing import DeviceArrayLike
 from ._sort_common import DoubleBuffer, SortOrder, _get_arrays
 
@@ -76,7 +77,7 @@ class _RadixSort:
         # TODO: decomposer op is not supported for now
         self.decomposer_op = cccl.Op(
             name="",
-            operator_type=cccl.OpKind.STATELESS,
+            operator_type=OpKind.STATELESS,
             ltoir=b"",
             state_alignment=1,
             state=None,

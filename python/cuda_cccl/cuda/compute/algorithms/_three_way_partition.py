@@ -5,8 +5,6 @@
 
 from typing import Callable
 
-import numba
-
 from .. import _bindings
 from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
@@ -16,6 +14,7 @@ from .._cccl_interop import (
     is_iterator,
     set_cccl_iterator_state,
 )
+from .._types import boolean
 from .._utils import protocols
 from .._utils.temp_storage_buffer import TempStorageBuffer
 from ..iterators import IteratorProtocol
@@ -97,13 +96,13 @@ class _ThreeWayPartition:
         self.d_unselected_out_cccl = cccl.to_cccl_output_iter(d_unselected_out)
         self.d_num_selected_out_cccl = cccl.to_cccl_output_iter(d_num_selected_out)
 
-        # Compile ops - partition predicates return uint8 (boolean)
+        # Compile ops - partition predicates return bool
         value_type = cccl.get_value_type(d_in)
         self.select_first_part_op_cccl = select_first_part_op.compile(
-            (value_type,), numba.types.uint8
+            (value_type,), boolean
         )
         self.select_second_part_op_cccl = select_second_part_op.compile(
-            (value_type,), numba.types.uint8
+            (value_type,), boolean
         )
 
         self.build_result = call_build(

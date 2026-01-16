@@ -5,8 +5,6 @@
 
 from typing import Callable
 
-import numba
-
 from .. import _bindings
 from .. import _cccl_interop as cccl
 from .._caching import cache_with_key
@@ -16,6 +14,7 @@ from .._cccl_interop import (
     is_iterator,
     set_cccl_iterator_state,
 )
+from .._types import boolean
 from .._utils import protocols
 from .._utils.protocols import (
     get_data_pointer,
@@ -96,7 +95,7 @@ class _UniqueByKey:
 
         # Compile the op - unique_by_key expects bool return (comparison)
         value_type = cccl.get_value_type(d_in_keys)
-        self.op_cccl = op.compile((value_type, value_type), numba.types.uint8)
+        self.op_cccl = op.compile((value_type, value_type), boolean)
 
         self.build_result = call_build(
             _bindings.DeviceUniqueByKeyBuildResult,
