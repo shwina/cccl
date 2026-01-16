@@ -73,6 +73,17 @@ def _type_to_enum(numba_type: types.Type) -> TypeEnum:
     return TypeEnum.STORAGE
 
 
+@functools.lru_cache(maxsize=1)
+def _legacy_iterators_available() -> bool:
+    import importlib.util
+
+    # If the new iterator implementation exists, prefer it.
+    if importlib.util.find_spec("cuda.compute.iterators._base") is not None:
+        return False
+    # Legacy iterators live in _iterators.py
+    return importlib.util.find_spec("cuda.compute.iterators._iterators") is not None
+
+
 # TODO: replace with functools.cache once our docs build environment
 # is upgraded to at least Python 3.9
 @functools.lru_cache(maxsize=None)
@@ -145,8 +156,55 @@ def type_enum_as_name(enum_value: int) -> str:
 
 
 def is_iterator(obj: object) -> TypeGuard["IteratorProtocol"]:
-    """Check if an object is an iterator (has to_cccl_iter method)."""
-    return hasattr(obj, "to_cccl_iter") and callable(obj.to_cccl_iter)
+    """Check if an object is an iterator (protocol or IteratorBase)."""
+    if hasattr(obj, "to_cccl_iter") and callable(obj.to_cccl_iter):
+        return True
+    try:
+        from .iterators._iterators import IteratorBase
+    except Exception:
+        return False
+    return isinstance(obj, IteratorBase)
+
+
+def _iterator_to_cccl_iter(it, is_output: bool) -> Iterator:
+    context = cuda.descriptor.cuda_target.target_context
+    state_ptr_type = it.state_ptr_type
+    state_type = it.state_type
+    size = context.get_value_type(state_type).get_abi_size(context.target_data)
+    iterator_state = memoryview(it.state)
+    if not iterator_state.nbytes == size:
+        raise ValueError(
+            f"Iterator state size, {iterator_state.nbytes} bytes, for iterator type {type(it)} "
+            f"does not match size of numba type, {size} bytes"
+        )
+    alignment = context.get_value_type(state_ptr_type).get_abi_alignment(
+        context.target_data
+    )
+
+    advance_abi_name, advance_ltoir = it.get_advance_ltoir()
+    if is_output:
+        deref_abi_name, deref_ltoir = it.get_output_dereference_ltoir()
+    else:
+        deref_abi_name, deref_ltoir = it.get_input_dereference_ltoir()
+
+    advance_op = Op(
+        operator_type=OpKind.STATELESS,
+        name=advance_abi_name,
+        ltoir=advance_ltoir,
+    )
+    deref_op = Op(
+        operator_type=OpKind.STATELESS,
+        name=deref_abi_name,
+        ltoir=deref_ltoir,
+    )
+    return Iterator(
+        alignment,
+        IteratorKind.ITERATOR,
+        advance_op,
+        deref_op,
+        _numba_type_to_info(it.value_type),
+        state=it.state,
+    )
 
 
 def get_iterator_kind(it):
@@ -158,9 +216,11 @@ def _to_cccl_iter(it, is_output: bool) -> Iterator:
     """Convert an iterator or array to a CCCL Iterator."""
     if it is None:
         return _none_to_cccl_iter()
-    # Iterator protocol - has to_cccl_iter method
+    # Iterator protocol / IteratorBase
     if is_iterator(it):
-        return it.to_cccl_iter(is_output=is_output)
+        if hasattr(it, "to_cccl_iter") and callable(it.to_cccl_iter):
+            return it.to_cccl_iter(is_output=is_output)
+        return _iterator_to_cccl_iter(it, is_output=is_output)
     # Device array
     return _device_array_to_cccl_iter(it)
 
@@ -236,6 +296,8 @@ def get_value_type(d_in):
 
     # Iterator protocol - returns TypeDescriptor or ZipValueType
     if is_iterator(d_in):
+        if hasattr(d_in, "value_type"):
+            return d_in.value_type
         # ZipIterator returns ZipValueType for Numba Tuple conversion
         if hasattr(d_in, "_component_types") and d_in._component_types is not None:
             return ZipValueType(d_in.value_type, d_in._component_types)
@@ -248,11 +310,15 @@ def get_value_type(d_in):
     # Arrays - check dtype
     dtype = get_dtype(d_in)
 
-    # Structured dtype → create anonymous gpu_struct
+    # Structured dtype handling differs between legacy and new iterator layouts
     if dtype.fields is not None:
+        if _legacy_iterators_available():
+            return as_numba_type(gpu_struct(dtype))
         return gpu_struct(dtype)
 
-    # Scalar dtype → return TypeDescriptor
+    # Scalar dtype
+    if _legacy_iterators_available():
+        return numba.from_dtype(dtype)
     return from_numpy_dtype(dtype)
 
 
