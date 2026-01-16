@@ -9,7 +9,7 @@ import os
 import subprocess
 import tempfile
 import warnings
-from typing import TYPE_CHECKING, Callable, List, TypeGuard
+from typing import TYPE_CHECKING, Any, Callable, List, Protocol, TypeGuard
 
 import numba
 import numpy as np
@@ -61,7 +61,10 @@ _TYPE_TO_ENUM = {
 if TYPE_CHECKING:
     from numba.core.typing import Signature
 
-    from .iterators._protocol import IteratorProtocol
+    class IteratorProtocol(Protocol):
+        kind: object
+
+        def to_cccl_iter(self, *, is_output: bool) -> Any: ...
 
 
 def _type_to_enum(numba_type: types.Type) -> TypeEnum:
