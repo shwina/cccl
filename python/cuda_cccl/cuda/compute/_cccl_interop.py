@@ -77,11 +77,11 @@ def _type_to_enum(numba_type: types.Type) -> TypeEnum:
 def _legacy_iterators_available() -> bool:
     import importlib.util
 
-    # If the new iterator implementation exists, prefer it.
-    if importlib.util.find_spec("cuda.compute.iterators._base") is not None:
-        return False
-    # Legacy iterators live in _iterators.py
-    return importlib.util.find_spec("cuda.compute.iterators._iterators") is not None
+    # Prefer legacy if it's present in the active package.
+    if importlib.util.find_spec("cuda.compute.iterators._iterators") is not None:
+        return True
+    # Otherwise, check for the new iterator implementation.
+    return importlib.util.find_spec("cuda.compute.iterators._base") is None
 
 
 # TODO: replace with functools.cache once our docs build environment
