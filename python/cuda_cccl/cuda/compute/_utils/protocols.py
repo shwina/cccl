@@ -143,3 +143,12 @@ def validate_and_get_stream(stream) -> Optional[int]:
         return handle
 
     raise TypeError(f"unsupported __cuda_stream__ version {version}")
+
+
+# ============================================================================
+# Register keyers
+# ============================================================================
+# Note: DeviceArrayLike and GpuStruct are Protocols (duck-typed interfaces).
+# They're handled automatically by the registry via attribute checks:
+# - DeviceArrayLike: checked via __cuda_array_interface__
+# - GpuStruct: checked via .dtype attribute

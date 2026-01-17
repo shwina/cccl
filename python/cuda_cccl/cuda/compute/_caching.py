@@ -4,6 +4,9 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 import functools
+from typing import Any, Callable, Hashable
+
+import numpy as np
 
 try:
     from cuda.core import Device
@@ -11,49 +14,190 @@ except ImportError:
     from cuda.core.experimental import Device
 
 
+# ============================================================================
+# Cache Key Registry
+# ============================================================================
+
+# Registry maps type -> keyer function (extracts cache key from value)
+_KEYERS: dict[type, Callable[[Any], Hashable]] = {}
+
+
+def _key_for(value: Any) -> Hashable:
+    """
+    Extract a cache key from a value using the registered keyers.
+
+    This function checks the type of the value and delegates to the
+    appropriate registered keyer. Falls back to using the value
+    directly if no keyer is registered.
+
+    Args:
+        value: The value to extract a cache key from
+
+    Returns:
+        A hashable cache key
+    """
+    # Check for exact type match first
+    value_type = type(value)
+    if value_type in _KEYERS:
+        return _KEYERS[value_type](value)
+
+    # Check for instance match (handles inheritance)
+    for registered_type, keyer in _KEYERS.items():
+        if isinstance(value, registered_type):
+            return keyer(value)
+
+    # For numpy dtypes, return directly (they're already hashable)
+    if isinstance(value, np.dtype):
+        return value
+
+    # For None, return directly
+    if value is None:
+        return None
+
+    # Check if it's a DeviceArrayLike (duck-typed via __cuda_array_interface__)
+    if hasattr(value, "__cuda_array_interface__"):
+        # It's a device array-like, extract dtype
+        from ._utils.protocols import get_dtype
+
+        return get_dtype(value)
+
+    # Check if it has a dtype attribute (GpuStruct, etc.)
+    if hasattr(value, "dtype"):
+        return value.dtype
+
+    # Fallback: use value directly (assumes it's hashable)
+    return value
+
+
+def _make_cache_key_from_args(*args, **kwargs) -> tuple:
+    """
+    Create a cache key from function arguments.
+
+    Args:
+        *args: Positional arguments
+        **kwargs: Keyword arguments
+
+    Returns:
+        A tuple containing the extracted cache keys
+    """
+
+    positional_keys = tuple(_key_for(arg) for arg in args)
+
+    # Sort kwargs by key name for consistent ordering
+    if kwargs:
+        sorted_kwargs = sorted(kwargs.items())
+        kwarg_keys = tuple((k, _key_for(v)) for k, v in sorted_kwargs)
+        return positional_keys + (kwarg_keys,)
+
+    return positional_keys
+
+
+# Register built-in types
+_KEYERS[np.ndarray] = lambda arr: arr.dtype
+
+
+# ============================================================================
+# Central Cache Registry
+# ============================================================================
+
 # Central registry of all algorithm caches
 _cache_registry: dict[str, object] = {}
 
 
-def cache_with_key(key):
+class _CacheWithKeyerDecorator:
     """
-    Decorator to cache the result of the decorated function.  Uses the
-    provided `key` function to compute the key for cache lookup. `key`
-    receives all arguments passed to the function.
-
-    Notes
-    -----
-    The CUDA compute capability of the current device is appended to
-    the cache key returned by `key`.
-
-    The decorated function is automatically registered in the central
-    cache registry for easy cache management.
+    Decorator class that provides caching with automatic key extraction.
     """
 
-    def deco(func):
-        cache = {}
+    @staticmethod
+    def register(type_, keyer):
+        """
+        Register a keyer function for a specific type.
 
-        @functools.wraps(func)
-        def inner(*args, **kwargs):
-            cc = Device().compute_capability
-            cache_key = (key(*args, **kwargs), tuple(cc))
-            if cache_key not in cache:
-                result = func(*args, **kwargs)
-                cache[cache_key] = result
-            return cache[cache_key]
+        A keyer is a function that extracts a hashable cache key from a value.
 
-        def cache_clear():
-            cache.clear()
+        Args:
+            type_: The type to register
+            keyer: A callable that takes an instance of type_ and returns a hashable cache key
+        """
+        _KEYERS[type_] = keyer
 
-        inner.cache_clear = cache_clear
+    def __call__(self, func_or_key=None):
+        """
+        Decorator to cache the result of the decorated function.
 
-        # Register the cache in the central registry
-        cache_name = func.__qualname__
-        _cache_registry[cache_name] = inner
+        If `key` is provided, it should be a function that computes the cache key
+        from the function arguments. Otherwise, the cache key is automatically
+        computed from all arguments using the cache key registry.
 
-        return inner
+        Notes
+        -----
+        The CUDA compute capability of the current device is appended to
+        the cache key.
 
-    return deco
+        The decorated function is automatically registered in the central
+        cache registry for easy cache management.
+
+        Args:
+            func_or_key: The function to decorate, or a custom key function.
+        """
+        # Check if this is being used without parentheses (@cache_with_keyer)
+        if callable(func_or_key) and not hasattr(func_or_key, "__self__"):
+            # Direct decoration: @cache_with_keyer
+            # func_or_key is the actual function being decorated
+            return self._make_wrapper(None)(func_or_key)
+
+        # Otherwise, return a decorator (supports both @cache_with_keyer() and @cache_with_keyer(key_fn))
+        key = func_or_key  # Could be None or a custom key function
+        return self._make_wrapper(key)
+
+    def _make_wrapper(self, key):
+        """
+        Create the actual caching wrapper.
+
+        Args:
+            key: Optional function to compute cache key from args/kwargs.
+                 If None, uses the cache key registry to automatically compute keys.
+        """
+
+        def deco(func):
+            cache = {}
+
+            @functools.wraps(func)
+            def inner(*args, **kwargs):
+                cc = Device().compute_capability
+                if key is not None:
+                    # Use provided key function
+                    user_cache_key = key(*args, **kwargs)
+                else:
+                    # Use registry-based automatic key generation
+                    user_cache_key = _make_cache_key_from_args(*args, **kwargs)
+
+                cache_key = (user_cache_key, tuple(cc))
+                if cache_key not in cache:
+                    result = func(*args, **kwargs)
+                    cache[cache_key] = result
+                return cache[cache_key]
+
+            def cache_clear():
+                cache.clear()
+
+            inner.cache_clear = cache_clear
+
+            # Register the cache in the central registry
+            cache_name = func.__qualname__
+            _cache_registry[cache_name] = inner
+
+            return inner
+
+        return deco
+
+
+# Create the singleton instance
+cache_with_keyer = _CacheWithKeyerDecorator()
+
+# Keep old name for backwards compatibility
+cache_with_key = cache_with_keyer
 
 
 def _hash_device_array_like(value):
