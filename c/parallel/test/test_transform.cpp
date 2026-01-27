@@ -527,6 +527,7 @@ C2H_TEST("Transform works with stateful unary operators", "[transform]")
 {
   const std::size_t num_items = GENERATE(0, 42, take(4, random(1 << 12, 1 << 16)));
   pointer_t<int> counter(1);
+  REQUIRE(cudaSuccess == cudaMemset(counter.ptr, 0, sizeof(int)));
   stateful_operation_t<transform_stateful_counter_state_t> op = make_operation(
     "op",
     R"(struct transform_stateful_counter_state_t { int* d_counter; };
