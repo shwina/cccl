@@ -13,7 +13,7 @@ print_help() {
     echo "Options:"
     echo "  -c, --cuda               Specify the CUDA version. E.g., 12.2"
     echo "  --cuda-ext               Use a docker image with extended CTK libraries."
-    echo "  -H, --host               Specify the host compiler. E.g., gcc12"
+    echo "  -H, --hosto               Specify the host compiler. E.g., gcc12"
     echo "  -d, --docker             Launch the development environment in Docker directly without using VSCode."
     echo "  --gpus gpu-request       GPU devices to add to the container ('all' to pass all GPUs)."
     echo "  -e, --env list           Set additional container environment variables."

@@ -281,8 +281,15 @@ def to_stateful_cccl_op(func, state_arrays, sig: "Signature") -> Op:
     # Compile the wrapper to LTOIR
     ltoir, _ = cuda.compile(wrapped_op, sig=wrapper_sig, output="ltoir")
 
-    # Pack all data pointers as bytes (sequentially)
+    # Pack all data pointers as bytes, matching op_state layout
+    pointer_size = struct.calcsize("P")
     state_bytes = struct.pack(f"{len(state_ptrs)}P", *state_ptrs)
+    if state_alignment > pointer_size:
+        padding = (
+            state_alignment - (len(state_bytes) % state_alignment)
+        ) % state_alignment
+        if padding:
+            state_bytes += b"\x00" * padding
 
     # Return Op with STATEFUL kind and packed pointers
     return Op(

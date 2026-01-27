@@ -129,7 +129,10 @@ class _StatefulOp(_OpAdapter):
     def get_cache_key(self) -> Hashable:
         from ._utils import protocols
 
-        state_info = tuple((protocols.get_dtype(s), s.size) for s in self._state_arrays)
+        state_info = tuple(
+            (protocols.get_dtype(s), s.size, protocols.get_dtype(s).itemsize)
+            for s in self._state_arrays
+        )
         return (self.__class__.__name__, self._cachable, state_info)
 
     def compile(self, input_types, output_type=None) -> Op:
