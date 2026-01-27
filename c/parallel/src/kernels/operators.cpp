@@ -85,18 +85,18 @@ struct op_wrapper {{
 )XXX";
 
 constexpr std::string_view stateful_binary_op_template = R"XXX(
-struct __align__(OP_ALIGNMENT) op_state {
+struct __align__(OP_ALIGNMENT) op_state {{
   char data[OP_SIZE];
-};
-__device__ __constant__ op_state op_state_instance = {OP_STATE_BYTES};
+}};
+__device__ __constant__ op_state op_state_instance = {{OP_STATE_BYTES}};
 extern "C" __device__ void OP_NAME(void* state, const void* lhs, const void* rhs, void* out);
-struct op_wrapper {
-  __device__ {0} operator()(const LHS_T& lhs, const RHS_T& rhs) {
+struct op_wrapper {{
+  __device__ {0} operator()(const LHS_T& lhs, const RHS_T& rhs) {{
     {0} ret;
     OP_NAME(const_cast<op_state*>(&op_state_instance), &lhs, &rhs, &ret);
     return ret;
-  }
-};
+  }}
+}};
 )XXX";
 
 std::string make_kernel_binary_operator_full_source(
@@ -131,8 +131,8 @@ std::string make_kernel_binary_operator_full_source(
   const std::string op_size        = is_stateful ? std::format("{}", operation.size) : "";
   const std::string op_state_bytes = is_stateful ? format_state_bytes(operation.state, operation.size) : "0";
   const std::string op_src =
-    is_stateful ? std::vformat(std::string(stateful_binary_op_template), std::make_format_args(return_type))
-                : std::string(stateless_binary_op_template);
+    std::vformat(std::string(is_stateful ? stateful_binary_op_template : stateless_binary_op_template),
+                 std::make_format_args(return_type));
 
   return std::format(binary_op_template, lhs_t, rhs_t, operation.name, op_alignment, op_size, op_state_bytes, op_src);
 }
