@@ -95,34 +95,17 @@ class IteratorBase:
             self._uid_cached = _deterministic_suffix(self.kind)
         return self._uid_cached
 
-    def _get_symbol_prefix(self) -> str:
-        """
-        Get the prefix for symbol names based on iterator type.
-
-        Override in subclass if you need a custom prefix.
-        Default converts class name from CamelCase to snake_case and removes 'Iterator' suffix.
-        """
-        import re
-
-        class_name = type(self).__name__
-        if class_name.endswith("Iterator"):
-            class_name = class_name[:-8]  # Remove 'Iterator' suffix
-        # Convert CamelCase to snake_case
-        class_name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", class_name)
-        class_name = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", class_name)
-        return class_name.lower()
-
     def _make_advance_symbol(self) -> str:
         """Generate symbol name for advance operation."""
-        return f"{self._get_symbol_prefix()}_advance_{self._get_uid()}"
+        return f"{self.__class__.__name__}_advance_{self._get_uid()}"
 
     def _make_input_deref_symbol(self) -> str:
         """Generate symbol name for input dereference operation."""
-        return f"{self._get_symbol_prefix()}_input_deref_{self._get_uid()}"
+        return f"{self.__class__.__name__}_input_deref_{self._get_uid()}"
 
     def _make_output_deref_symbol(self) -> str:
         """Generate symbol name for output dereference operation."""
-        return f"{self._get_symbol_prefix()}_output_deref_{self._get_uid()}"
+        return f"{self.__class__.__name__}_output_deref_{self._get_uid()}"
 
     def _collect_child_ltoirs(self, op_type: str) -> list[bytes]:
         """Collect LTOIRs from all children for the specified operation type."""
