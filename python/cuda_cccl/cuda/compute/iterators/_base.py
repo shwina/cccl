@@ -16,24 +16,6 @@ from .._caching import cache_with_registered_key_functions
 from ..types import TypeDescriptor
 
 
-def _deterministic_suffix(kind: Hashable) -> str:
-    """
-    Generate a deterministic suffix from an iterator's kind.
-
-    This ensures that iterators with the same logical structure
-    (same kind) generate identical symbol names, allowing compilation
-    results to be shared across iterator instances.
-
-    Args:
-        kind: The iterator's kind (must be hashable)
-
-    Returns:
-        A 16-character hexadecimal string derived from the kind
-    """
-    kind_str = str(kind)
-    return hashlib.sha256(kind_str.encode()).hexdigest()[:16]
-
-
 class IteratorBase:
     """
     Base class for iterators that use C++ codegen.
@@ -304,6 +286,24 @@ class IteratorBase:
     def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
         """Generate C++ source for output dereference. Returns (symbol, source, extra_ltoirs) or None."""
         raise NotImplementedError
+
+
+def _deterministic_suffix(kind: Hashable) -> str:
+    """
+    Generate a deterministic suffix from an iterator's kind.
+
+    This ensures that iterators with the same logical structure
+    (same kind) generate identical symbol names, allowing compilation
+    results to be shared across iterator instances.
+
+    Args:
+        kind: The iterator's kind (must be hashable)
+
+    Returns:
+        A 16-character hexadecimal string derived from the kind
+    """
+    kind_str = str(kind)
+    return hashlib.sha256(kind_str.encode()).hexdigest()[:16]
 
 
 cache_with_registered_key_functions.register(IteratorBase, lambda it: it.kind)
