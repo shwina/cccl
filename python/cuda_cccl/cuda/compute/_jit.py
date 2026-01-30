@@ -466,7 +466,7 @@ def get_input_types_from_annotations(py_func):
     return input_tds
 
 
-def get_return_type_from_annotations_or_infer(py_func, input_types):
+def get_or_infer_return_type(py_func, input_types):
     try:
         annotations = get_type_hints(py_func)
     except Exception:
@@ -548,5 +548,7 @@ def compile_op(op, input_types, output_type=None):
 
 
 __all__ = [
+    "get_input_types_from_annotations",
+    "get_or_infer_return_type",
     "compile_op",
 ]

@@ -90,9 +90,9 @@ class _StatelessOp(_OpAdapter):
         self._cachable = CachableFunction(func)
 
     def get_return_type(self, input_types):
-        from ._jit import get_return_type_from_annotations_or_infer
+        from ._jit import get_or_infer_return_type
 
-        return get_return_type_from_annotations_or_infer(self._func, input_types)
+        return get_or_infer_return_type(self._func, input_types)
 
     def compile(self, input_types, output_type=None) -> Op:
         from ._jit import compile_op
