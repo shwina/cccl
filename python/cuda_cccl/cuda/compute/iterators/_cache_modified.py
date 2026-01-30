@@ -6,12 +6,18 @@
 
 from __future__ import annotations
 
+from textwrap import dedent
 from typing import Literal
 
-from .._cpp_codegen import compile_cpp_to_ltoir, cpp_type_from_descriptor
+from .._cpp_codegen import cpp_type_from_descriptor
 from .._utils.protocols import get_data_pointer, get_dtype
 from ..types import from_numpy_dtype
-from ._base import IteratorBase, _deterministic_suffix
+from ._base import IteratorBase
+from ._codegen_utils import (
+    ADVANCE_TEMPLATE,
+    INPUT_DEREF_TEMPLATE,
+    format_template,
+)
 
 # Map modifier names to PTX cache operators and C++ intrinsics
 _CACHE_MODIFIERS = {
@@ -35,9 +41,6 @@ class CacheModifiedInputIterator(IteratorBase):
         "_modifier",
         "_array",
         "_ptr",
-        "_uid",
-        "_advance_result",
-        "_input_deref_result",
     ]
 
     def __init__(
@@ -70,92 +73,49 @@ class CacheModifiedInputIterator(IteratorBase):
 
         state_bytes = struct.pack("Q", ptr)
 
-        self._advance_result: tuple[str, bytes, list[bytes]] | None = None
-        self._input_deref_result: tuple[str, bytes, list[bytes]] | None = None
-
         super().__init__(
             state_bytes=state_bytes,
             state_alignment=8,  # Pointer alignment
             value_type=value_type,
         )
 
-        # Generate deterministic suffix after super().__init__() so self.kind is available
-        self._uid = _deterministic_suffix(self.kind)
-
-    def _compile_if_needed(self) -> None:
-        if self._advance_result is not None:
-            return
-
-        # Compile advance
-        symbol, ltoir = self._compile_advance()
-        self._advance_result = (symbol, ltoir, [])
-
-        # Compile input dereference
-        symbol, ltoir = self._compile_input_deref()
-        self._input_deref_result = (symbol, ltoir, [])
-
-    def _compile_advance(self) -> tuple[str, bytes]:
-        symbol = f"cache_mod_advance_{self._uid}"
+    def _generate_advance_source(self) -> tuple[str, str, list[bytes]]:
+        symbol = self._make_advance_symbol()
         cpp_type = cpp_type_from_descriptor(self._value_type)
 
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
+        body = dedent(f"""
+            auto* s = static_cast<{cpp_type}**>(state);
+            auto dist = *static_cast<uint64_t*>(offset);
+            *s += dist;
+        """).strip()
 
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    auto* s = static_cast<{cpp_type}**>(state);
-    auto dist = *static_cast<uint64_t*>(offset);
-    *s += dist;
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
+        source = format_template(ADVANCE_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
-    def _compile_input_deref(self) -> tuple[str, bytes]:
-        symbol = f"cache_mod_deref_{self._uid}"
+    def _generate_input_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        symbol = self._make_input_deref_symbol()
         cpp_type = cpp_type_from_descriptor(self._value_type)
         _, intrinsic = _CACHE_MODIFIERS[self._modifier]
 
         # For types that don't support direct __ldcs, we need to use inline PTX
         # __ldcs works for 4-byte and 8-byte types
         if self._value_type.size in (4, 8):
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    auto* ptr = *static_cast<{cpp_type}**>(state);
-    *static_cast<{cpp_type}*>(result) = {intrinsic}(ptr);
-}}
-"""
+            body = dedent(f"""
+                auto* ptr = *static_cast<{cpp_type}**>(state);
+                *static_cast<{cpp_type}*>(result) = {intrinsic}(ptr);
+            """).strip()
         else:
             # For smaller types, fall back to regular load
             # (cache modifiers for small types aren't as beneficial)
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
+            body = dedent(f"""
+                auto* ptr = *static_cast<{cpp_type}**>(state);
+                *static_cast<{cpp_type}*>(result) = *ptr;
+            """).strip()
 
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    auto* ptr = *static_cast<{cpp_type}**>(state);
-    *static_cast<{cpp_type}*>(result) = *ptr;
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
+        source = format_template(INPUT_DEREF_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
-    def get_advance_ltoir(self) -> tuple[str, bytes, list[bytes]]:
-        self._compile_if_needed()
-        assert self._advance_result is not None
-        return self._advance_result
-
-    def get_input_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
-        self._compile_if_needed()
-        return self._input_deref_result
-
-    def get_output_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
+    def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
         # Cache-modified iterator is input-only
         return None
 
@@ -184,9 +144,7 @@ extern "C" __device__ void {symbol}(void* state, void* result) {{
         clone._state_bytes = struct.pack("Q", offset_ptr)
         clone._state_alignment = 8
         clone._value_type = self._value_type
-        clone._advance_result = None
-        clone._input_deref_result = None
-        clone._uid = _deterministic_suffix(clone.kind)
+        clone._uid_cached = None
         return clone
 
     @property

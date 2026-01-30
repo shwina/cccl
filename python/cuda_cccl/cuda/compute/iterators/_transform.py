@@ -6,15 +6,22 @@
 
 from __future__ import annotations
 
+from textwrap import dedent
+
 from .._bindings import IteratorState
 from .._cpp_codegen import (
-    compile_cpp_to_ltoir,
     cpp_type_from_descriptor,
     extract_extra_ltoirs,
 )
 from ..op import make_op_adapter
 from ..types import TypeDescriptor
-from ._base import IteratorBase, _deterministic_suffix
+from ._base import IteratorBase
+from ._codegen_utils import (
+    ADVANCE_TEMPLATE,
+    INPUT_DEREF_TEMPLATE,
+    OUTPUT_DEREF_TEMPLATE,
+    format_template,
+)
 
 
 class TransformIterator(IteratorBase):
@@ -29,10 +36,6 @@ class TransformIterator(IteratorBase):
         "_underlying",
         "_transform_op",
         "_value_type",
-        "_uid",
-        "_advance_result",
-        "_input_deref_result",
-        "_output_deref_result",
         "_is_input",
         "_compiled_op",
     ]
@@ -57,10 +60,6 @@ class TransformIterator(IteratorBase):
         self._transform_op = make_op_adapter(transform_op)
         self._value_type = output_value_type
         self._is_input = is_input
-
-        self._advance_result: tuple[str, bytes, list[bytes]] | None = None
-        self._input_deref_result: tuple[str, bytes, list[bytes]] | None = None
-        self._output_deref_result: tuple[str, bytes, list[bytes]] | None = None
         self._compiled_op = None  # Lazy compiled Op
 
         super().__init__(
@@ -68,9 +67,6 @@ class TransformIterator(IteratorBase):
             state_alignment=self._underlying.state_alignment,
             value_type=output_value_type,
         )
-
-        # Generate deterministic suffix after super().__init__() so self.kind is available
-        self._uid = _deterministic_suffix(self.kind)
 
     def _get_compiled_op(self):
         """Get the compiled Op, compiling lazily if needed."""
@@ -88,110 +84,86 @@ class TransformIterator(IteratorBase):
             )
         return self._compiled_op
 
-    def _compile_if_needed(self) -> None:
-        if self._advance_result is not None:
-            return
+    def _generate_advance_source(self) -> tuple[str, str, list[bytes]]:
+        """Generate advance that delegates to underlying iterator."""
+        underlying_advance, _, _ = self._underlying.get_advance_ltoir()
+        symbol = self._make_advance_symbol()
 
-        # Get underlying iterator's advance
-        adv_name, adv_ltoir, adv_extras = self._underlying.get_advance_ltoir()
+        body = dedent(f"""
+            {underlying_advance}(state, offset);
+        """).strip()
 
-        # Compile our advance (delegates to underlying)
-        symbol, ltoir = self._compile_advance(adv_name)
-        # Our advance depends on underlying's advance
-        self._advance_result = (symbol, ltoir, [adv_ltoir] + adv_extras)
+        source = format_template(
+            ADVANCE_TEMPLATE,
+            symbol=symbol,
+            body=body,
+            extern_symbols=[underlying_advance],
+        )
+        return (symbol, source, [])
 
-        # Get transform op info
+    def _generate_input_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        """Generate input dereference that reads from underlying then transforms."""
+        if not self._is_input:
+            return None
+
+        underlying_result = self._underlying.get_input_dereference_ltoir()
+        if underlying_result is None:
+            raise ValueError("Underlying iterator must support input dereference")
+        underlying_deref, _, _ = underlying_result
+
         compiled_op = self._get_compiled_op()
-        op_name = compiled_op.name
+        transform_op = compiled_op.name
         op_ltoir = compiled_op.ltoir
         op_extras = extract_extra_ltoirs(compiled_op)
 
+        symbol = self._make_input_deref_symbol()
+        underlying_type = cpp_type_from_descriptor(self._underlying.value_type)
+
+        body = dedent(f"""
+            alignas({self._underlying.value_type.alignment}) {underlying_type} temp;
+            {underlying_deref}(state, &temp);
+            {transform_op}(&temp, result);
+        """).strip()
+
+        source = format_template(
+            INPUT_DEREF_TEMPLATE,
+            symbol=symbol,
+            body=body,
+            extern_symbols=[underlying_deref, transform_op],
+        )
+        return (symbol, source, [op_ltoir] + op_extras)
+
+    def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        """Generate output dereference that transforms then writes to underlying."""
         if self._is_input:
-            in_result = self._underlying.get_input_dereference_ltoir()
-            if in_result is None:
-                raise ValueError("Underlying iterator must support input dereference")
-            in_name, in_ltoir, in_extras = in_result
+            return None
 
-            symbol, ltoir = self._compile_input_deref(in_name, op_name)
-            # Input deref depends on underlying deref + transform op
-            self._input_deref_result = (
-                symbol,
-                ltoir,
-                [in_ltoir] + in_extras + [op_ltoir] + op_extras,
-            )
-        else:
-            out_result = self._underlying.get_output_dereference_ltoir()
-            if out_result is None:
-                raise ValueError("Underlying iterator must support output dereference")
-            out_name, out_ltoir, out_extras = out_result
+        underlying_result = self._underlying.get_output_dereference_ltoir()
+        if underlying_result is None:
+            raise ValueError("Underlying iterator must support output dereference")
+        underlying_deref, _, _ = underlying_result
 
-            symbol, ltoir = self._compile_output_deref(out_name, op_name)
-            self._output_deref_result = (
-                symbol,
-                ltoir,
-                [out_ltoir] + out_extras + [op_ltoir] + op_extras,
-            )
+        compiled_op = self._get_compiled_op()
+        transform_op = compiled_op.name
+        op_ltoir = compiled_op.ltoir
+        op_extras = extract_extra_ltoirs(compiled_op)
 
-    def _compile_advance(self, underlying_advance: str) -> tuple[str, bytes]:
-        symbol = f"transform_advance_{self._uid}"
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-extern "C" __device__ void {underlying_advance}(void*, void*);
-
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    {underlying_advance}(state, offset);
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
-
-    def _compile_input_deref(
-        self, underlying_deref: str, transform_op: str
-    ) -> tuple[str, bytes]:
-        symbol = f"transform_input_deref_{self._uid}"
+        symbol = self._make_output_deref_symbol()
         underlying_type = cpp_type_from_descriptor(self._underlying.value_type)
 
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
+        body = dedent(f"""
+            alignas({self._underlying.value_type.alignment}) {underlying_type} temp;
+            {transform_op}(value, &temp);
+            {underlying_deref}(state, &temp);
+        """).strip()
 
-extern "C" __device__ void {underlying_deref}(void*, void*);
-extern "C" __device__ void {transform_op}(void*, void*);
-
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    alignas({self._underlying.value_type.alignment}) {underlying_type} temp;
-    {underlying_deref}(state, &temp);
-    {transform_op}(&temp, result);
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
-
-    def _compile_output_deref(
-        self, underlying_deref: str, transform_op: str
-    ) -> tuple[str, bytes]:
-        symbol = f"transform_output_deref_{self._uid}"
-        underlying_type = cpp_type_from_descriptor(self._underlying.value_type)
-
-        source = f"""
-#include <cuda/std/cstdint>
-using namespace cuda::std;
-
-extern "C" __device__ void {underlying_deref}(void*, void*);
-extern "C" __device__ void {transform_op}(void*, void*);
-
-extern "C" __device__ void {symbol}(void* state, void* value) {{
-    alignas({self._underlying.value_type.alignment}) {underlying_type} temp;
-    {transform_op}(value, &temp);
-    {underlying_deref}(state, &temp);
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
+        source = format_template(
+            OUTPUT_DEREF_TEMPLATE,
+            symbol=symbol,
+            body=body,
+            extern_symbols=[underlying_deref, transform_op],
+        )
+        return (symbol, source, [op_ltoir] + op_extras)
 
     def advance(self, offset: int) -> "TransformIterator":
         """Return a new iterator advanced by offset elements."""
@@ -225,19 +197,6 @@ extern "C" __device__ void {symbol}(void* state, void* value) {{
     @property
     def children(self):
         return (self._underlying,)
-
-    def get_advance_ltoir(self) -> tuple[str, bytes, list[bytes]]:
-        self._compile_if_needed()
-        assert self._advance_result is not None
-        return self._advance_result
-
-    def get_input_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
-        self._compile_if_needed()
-        return self._input_deref_result
-
-    def get_output_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
-        self._compile_if_needed()
-        return self._output_deref_result
 
     @property
     def is_input_iterator(self) -> bool:

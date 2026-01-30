@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+from textwrap import dedent
+
 import numpy as np
 
 from .._cpp_codegen import cpp_type_from_descriptor
 from ..types import from_numpy_dtype
-from ._base import IteratorBase, _deterministic_suffix
+from ._base import IteratorBase
+from ._codegen_utils import ADVANCE_TEMPLATE, INPUT_DEREF_TEMPLATE, format_template
 
 
 class CountingIterator(IteratorBase):
@@ -40,41 +43,31 @@ class CountingIterator(IteratorBase):
             value_type=value_type,
         )
 
-        # Generate deterministic suffix after super().__init__() so self.kind is available
-        self._uid = _deterministic_suffix(self.kind)
-
-    def _generate_advance_source(self) -> tuple[str, str]:
-        symbol = f"counting_advance_{self._uid}"
+    def _generate_advance_source(self) -> tuple[str, str, list[bytes]]:
+        symbol = self._make_advance_symbol()
         cpp_type = cpp_type_from_descriptor(self._value_type)
 
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
+        body = dedent(f"""
+            auto* s = static_cast<{cpp_type}*>(state);
+            auto dist = *static_cast<uint64_t*>(offset);
+            *s += static_cast<{cpp_type}>(dist);
+        """).strip()
 
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    auto* s = static_cast<{cpp_type}*>(state);
-    auto dist = *static_cast<uint64_t*>(offset);
-    *s += static_cast<{cpp_type}>(dist);
-}}
-"""
-        return (symbol, source)
+        source = format_template(ADVANCE_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
-    def _generate_input_deref_source(self) -> tuple[str, str] | None:
-        symbol = f"counting_deref_{self._uid}"
+    def _generate_input_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        symbol = self._make_input_deref_symbol()
         cpp_type = cpp_type_from_descriptor(self._value_type)
 
-        source = f"""
-#include <cuda/std/cstdint>
-using namespace cuda::std;
+        body = dedent(f"""
+            *static_cast<{cpp_type}*>(result) = *static_cast<{cpp_type}*>(state);
+        """).strip()
 
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    *static_cast<{cpp_type}*>(result) = *static_cast<{cpp_type}*>(state);
-}}
-"""
-        return (symbol, source)
+        source = format_template(INPUT_DEREF_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
-    def _generate_output_deref_source(self) -> tuple[str, str] | None:
+    def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
         return None
 
     def __add__(self, offset: int) -> "CountingIterator":

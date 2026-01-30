@@ -9,7 +9,13 @@ from __future__ import annotations
 from .._utils.protocols import get_dtype
 from .._utils.temp_storage_buffer import TempStorageBuffer
 from ..types import TypeDescriptor, from_numpy_dtype
-from ._base import IteratorBase, _deterministic_suffix
+from ._base import IteratorBase
+from ._codegen_utils import (
+    ADVANCE_TEMPLATE,
+    INPUT_DEREF_TEMPLATE,
+    OUTPUT_DEREF_TEMPLATE,
+    format_template,
+)
 
 
 class DiscardIterator(IteratorBase):
@@ -48,51 +54,26 @@ class DiscardIterator(IteratorBase):
             value_type=value_type,
         )
 
-        # Generate deterministic suffix after super().__init__() so self.kind is available
-        self._uid = _deterministic_suffix(self.kind)
+    def _generate_advance_source(self) -> tuple[str, str, list[bytes]]:
+        symbol = self._make_advance_symbol()
+        body = """(void)state;
+(void)offset;"""
+        source = format_template(ADVANCE_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
-    def _generate_advance_source(self) -> tuple[str, str]:
-        symbol = f"discard_advance_{self._uid}"
+    def _generate_input_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        symbol = self._make_input_deref_symbol()
+        body = """(void)state;
+(void)result;"""
+        source = format_template(INPUT_DEREF_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    (void)state;
-    (void)offset;
-}}
-"""
-        return (symbol, source)
-
-    def _generate_input_deref_source(self) -> tuple[str, str] | None:
-        symbol = f"discard_input_deref_{self._uid}"
-
-        source = f"""
-#include <cuda/std/cstdint>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    (void)state;
-    (void)result;
-}}
-"""
-        return (symbol, source)
-
-    def _generate_output_deref_source(self) -> tuple[str, str] | None:
-        symbol = f"discard_output_deref_{self._uid}"
-
-        source = f"""
-#include <cuda/std/cstdint>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* value) {{
-    (void)state;
-    (void)value;
-}}
-"""
-        return (symbol, source)
+    def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        symbol = self._make_output_deref_symbol()
+        body = """(void)state;
+(void)value;"""
+        source = format_template(OUTPUT_DEREF_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
     def __add__(self, offset: int) -> "DiscardIterator":
         """Return a new DiscardIterator (stateless, so position doesn't matter)."""

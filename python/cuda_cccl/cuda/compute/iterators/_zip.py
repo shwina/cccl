@@ -7,9 +7,59 @@
 from __future__ import annotations
 
 from .._bindings import IteratorState
-from .._cpp_codegen import compile_cpp_to_ltoir
 from ..types import TypeDescriptor, struct
-from ._base import IteratorBase, _deterministic_suffix
+from ._base import IteratorBase
+from ._codegen_utils import (
+    ADVANCE_TEMPLATE,
+    INPUT_DEREF_TEMPLATE,
+    OUTPUT_DEREF_TEMPLATE,
+    compose_iterator_states,
+    format_template,
+)
+
+
+def _generate_advance_body(child_symbols: list[str], state_offsets: list[int]) -> str:
+    """
+    Generate C++ code to call advance on multiple child iterators.
+
+    Args:
+        child_symbols: List of child iterator advance function names
+        state_offsets: List of byte offsets for each child's state
+
+    Returns:
+        C++ code calling each child's advance function
+    """
+    return "\n".join(
+        f"{sym}(static_cast<char*>(state) + {off}, offset);"
+        for sym, off in zip(child_symbols, state_offsets)
+    )
+
+
+def _generate_deref_body(
+    child_symbols: list[str],
+    state_offsets: list[int],
+    value_offsets: list[int],
+    result_name: str = "result",
+) -> str:
+    """
+    Generate C++ code to call dereference on multiple child iterators.
+
+    Used by ZipIterator to read/write to multiple child iterators at once.
+
+    Args:
+        child_symbols: List of child iterator dereference function names
+        state_offsets: List of byte offsets for each child's state
+        value_offsets: List of byte offsets for each child's value in result
+        result_name: Name of result/value parameter (usually "result" or "value")
+
+    Returns:
+        C++ code calling each child's dereference function
+    """
+    return "\n".join(
+        f"{sym}(static_cast<char*>(state) + {state_off}, "
+        f"static_cast<char*>({result_name}) + {val_off});"
+        for sym, state_off, val_off in zip(child_symbols, state_offsets, value_offsets)
+    )
 
 
 def _ensure_iterator(obj):
@@ -32,9 +82,7 @@ class ZipIterator(IteratorBase):
 
     __slots__ = [
         "_iterators",
-        "_uid",
         # TypeDescriptors for each component (for Numba tuple)
-        "_component_types",
         "_field_names",
         "_value_offsets",
         "_state_offsets",
@@ -66,29 +114,10 @@ class ZipIterator(IteratorBase):
 
         self._iterators = list(iterators)
 
-        # Build combined state
-        state_parts = []
-        offsets = []
-        current_offset = 0
-        max_alignment = 1
-
-        for it in self._iterators:
-            it_state = bytes(it.state)
-            it_align = it.state_alignment
-            max_alignment = max(max_alignment, it_align)
-
-            padding = (it_align - (current_offset % it_align)) % it_align
-            if padding > 0:
-                state_parts.append(b"\x00" * padding)
-                current_offset += padding
-
-            offsets.append(current_offset)
-            state_parts.append(it_state)
-            current_offset += len(it_state)
-
-        self._state_bytes = b"".join(state_parts)
-        self._state_alignment = max_alignment
-        self._state_offsets = offsets
+        # Compose states from all iterators
+        self._state_bytes, self._state_alignment, self._state_offsets = (
+            compose_iterator_states(self._iterators)
+        )
 
         # Build combined value type (struct layout)
         self._field_names = [f"field_{i}" for i in range(len(self._iterators))]
@@ -99,12 +128,6 @@ class ZipIterator(IteratorBase):
         self._value_offsets = [
             self._value_type.dtype.fields[name][1] for name in self._field_names
         ]
-        # Store component types for Numba Tuple conversion
-        self._component_types = tuple(it.value_type for it in self._iterators)
-
-        self._advance_result: tuple[str, bytes, list[bytes]] | None = None
-        self._input_deref_result: tuple[str, bytes, list[bytes]] | None = None
-        self._output_deref_result: tuple[str, bytes, list[bytes]] | None = None
 
         super().__init__(
             state_bytes=self._state_bytes,
@@ -112,144 +135,55 @@ class ZipIterator(IteratorBase):
             value_type=self._value_type,
         )
 
-        # Generate deterministic suffix after super().__init__() so self.kind is available
-        self._uid = _deterministic_suffix(self.kind)
+    def _generate_advance_source(self) -> tuple[str, str, list[bytes]]:
+        """Generate advance that calls all child iterator advances."""
+        advance_names = [it.get_advance_ltoir()[0] for it in self._iterators]
+        symbol = self._make_advance_symbol()
 
-    def _compile_if_needed(self) -> None:
-        if self._advance_result is not None:
-            return
+        body = _generate_advance_body(advance_names, self._state_offsets)
 
-        # Collect all iterator ops and their extras
-        advance_info = []  # (name, ltoir, extras)
-        input_deref_info = []  # (name, ltoir, extras) or None
-        output_deref_info = []  # (name, ltoir, extras) or None
+        source = format_template(
+            ADVANCE_TEMPLATE, symbol=symbol, body=body, extern_symbols=advance_names
+        )
+        return (symbol, source, [])
 
-        for it in self._iterators:
-            adv_name, adv_ltoir, adv_extras = it.get_advance_ltoir()
-            advance_info.append((adv_name, adv_ltoir, adv_extras))
+    def _generate_input_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        """Generate input deref that calls all child iterator input derefs."""
+        # Check if all iterators support input dereference
+        deref_results = [it.get_input_dereference_ltoir() for it in self._iterators]
+        if not all(result is not None for result in deref_results):
+            return None
 
-            in_result = it.get_input_dereference_ltoir()
-            input_deref_info.append(in_result)
+        deref_names = [result[0] for result in deref_results if result is not None]
+        symbol = self._make_input_deref_symbol()
 
-            out_result = it.get_output_dereference_ltoir()
-            output_deref_info.append(out_result)
-
-        # Compile advance
-        advance_names = [info[0] for info in advance_info]
-        symbol, ltoir = self._compile_advance(advance_names)
-        advance_extras = []
-        for info in advance_info:
-            advance_extras.append(info[1])
-            advance_extras.extend(info[2])
-        self._advance_result = (symbol, ltoir, advance_extras)
-
-        # Compile input dereference if all support it
-        if all(info is not None for info in input_deref_info):
-            # Filter to get only non-None values (mypy needs this)
-            valid_input_info = [info for info in input_deref_info if info is not None]
-            deref_names = [info[0] for info in valid_input_info]
-            symbol, ltoir = self._compile_input_deref(deref_names)
-            deref_extras: list[bytes] = []
-            for info in valid_input_info:
-                deref_extras.append(info[1])
-                deref_extras.extend(info[2])
-            self._input_deref_result = (symbol, ltoir, deref_extras)
-
-        # Compile output dereference if all support it
-        if all(info is not None for info in output_deref_info):
-            valid_output_info = [info for info in output_deref_info if info is not None]
-            deref_names = [info[0] for info in valid_output_info]
-            symbol, ltoir = self._compile_output_deref(deref_names)
-            deref_extras_out: list[bytes] = []
-            for info in valid_output_info:
-                deref_extras_out.append(info[1])
-                deref_extras_out.extend(info[2])
-            self._output_deref_result = (symbol, ltoir, deref_extras_out)
-
-    def _compile_advance(self, advance_names: list[str]) -> tuple[str, bytes]:
-        symbol = f"zip_advance_{self._uid}"
-
-        externs = "\n".join(
-            f'extern "C" __device__ void {name}(void*, void*);'
-            for name in advance_names
+        body = _generate_deref_body(
+            deref_names, self._state_offsets, self._value_offsets, result_name="result"
         )
 
-        calls = "\n    ".join(
-            f"{name}(static_cast<char*>(state) + {offset}, offset);"
-            for name, offset in zip(advance_names, self._state_offsets)
+        source = format_template(
+            INPUT_DEREF_TEMPLATE, symbol=symbol, body=body, extern_symbols=deref_names
+        )
+        return (symbol, source, [])
+
+    def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        """Generate output deref that calls all child iterator output derefs."""
+        # Check if all iterators support output dereference
+        deref_results = [it.get_output_dereference_ltoir() for it in self._iterators]
+        if not all(result is not None for result in deref_results):
+            return None
+
+        deref_names = [result[0] for result in deref_results if result is not None]
+        symbol = self._make_output_deref_symbol()
+
+        body = _generate_deref_body(
+            deref_names, self._state_offsets, self._value_offsets, result_name="value"
         )
 
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-{externs}
-
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    {calls}
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
-
-    def _compile_input_deref(self, deref_names: list[str]) -> tuple[str, bytes]:
-        symbol = f"zip_input_deref_{self._uid}"
-
-        externs = "\n".join(
-            f'extern "C" __device__ void {name}(void*, void*);' for name in deref_names
+        source = format_template(
+            OUTPUT_DEREF_TEMPLATE, symbol=symbol, body=body, extern_symbols=deref_names
         )
-
-        calls = "\n    ".join(
-            f"{name}(static_cast<char*>(state) + {state_off}, "
-            f"static_cast<char*>(result) + {val_off});"
-            for name, state_off, val_off in zip(
-                deref_names, self._state_offsets, self._value_offsets
-            )
-        )
-
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-{externs}
-
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    {calls}
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
-
-    def _compile_output_deref(self, deref_names: list[str]) -> tuple[str, bytes]:
-        symbol = f"zip_output_deref_{self._uid}"
-
-        externs = "\n".join(
-            f'extern "C" __device__ void {name}(void*, void*);' for name in deref_names
-        )
-
-        calls = "\n    ".join(
-            f"{name}(static_cast<char*>(state) + {state_off}, "
-            f"static_cast<char*>(value) + {val_off});"
-            for name, state_off, val_off in zip(
-                deref_names, self._state_offsets, self._value_offsets
-            )
-        )
-
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-{externs}
-
-extern "C" __device__ void {symbol}(void* state, void* value) {{
-    {calls}
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
+        return (symbol, source, [])
 
     @property
     def state(self) -> IteratorState:
@@ -266,19 +200,6 @@ extern "C" __device__ void {symbol}(void* state, void* value) {{
     @property
     def children(self):
         return tuple(self._iterators)
-
-    def get_advance_ltoir(self) -> tuple[str, bytes, list[bytes]]:
-        self._compile_if_needed()
-        assert self._advance_result is not None
-        return self._advance_result
-
-    def get_input_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
-        self._compile_if_needed()
-        return self._input_deref_result
-
-    def get_output_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
-        self._compile_if_needed()
-        return self._output_deref_result
 
     @property
     def is_input_iterator(self) -> bool:

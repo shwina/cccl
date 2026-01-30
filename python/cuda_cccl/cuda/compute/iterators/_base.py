@@ -39,11 +39,14 @@ class IteratorBase:
     Base class for iterators that use C++ codegen.
 
     Subclasses must implement:
-    - _generate_advance_source() -> tuple[str, str]  # (symbol, source)
-    - _generate_input_deref_source() -> tuple[str, str] | None
-    - _generate_output_deref_source() -> tuple[str, str] | None
+    - _generate_advance_source() -> tuple[str, str, list[bytes]]  # (symbol, source, extra_ltoirs)
+    - _generate_input_deref_source() -> tuple[str, str, list[bytes]] | None
+    - _generate_output_deref_source() -> tuple[str, str, list[bytes]] | None
 
-    The base class handles compilation and caching.
+    Optionally override:
+    - children property to return tuple of child iterators for automatic dependency tracking
+
+    The base class handles compilation, caching, and dependency collection.
     """
 
     __slots__ = [
@@ -53,6 +56,7 @@ class IteratorBase:
         "_advance_ltoir",
         "_input_deref_ltoir",
         "_output_deref_ltoir",
+        "_uid_cached",
     ]
 
     def __init__(
@@ -64,9 +68,10 @@ class IteratorBase:
         self._state_bytes = state_bytes
         self._state_alignment = state_alignment
         self._value_type = value_type
-        self._advance_ltoir: tuple[str, bytes] | None = None
-        self._input_deref_ltoir: tuple[str, bytes] | None = None
-        self._output_deref_ltoir: tuple[str, bytes] | None = None
+        self._advance_ltoir: tuple[str, bytes, list[bytes]] | None = None
+        self._input_deref_ltoir: tuple[str, bytes, list[bytes]] | None = None
+        self._output_deref_ltoir: tuple[str, bytes, list[bytes]] | None = None
+        self._uid_cached: str | None = None
 
     @property
     def state(self) -> IteratorState:
@@ -97,6 +102,65 @@ class IteratorBase:
         """Return the TypeDescriptor for dereferenced values."""
         return self._value_type
 
+    @property
+    def children(self) -> tuple["IteratorBase", ...]:
+        """Return child iterators for automatic dependency tracking. Override in subclasses."""
+        return ()
+
+    def _get_uid(self) -> str:
+        """Return a deterministic unique identifier for this iterator type."""
+        if self._uid_cached is None:
+            self._uid_cached = _deterministic_suffix(self.kind)
+        return self._uid_cached
+
+    def _get_symbol_prefix(self) -> str:
+        """
+        Get the prefix for symbol names based on iterator type.
+
+        Override in subclass if you need a custom prefix.
+        Default converts class name from CamelCase to snake_case and removes 'Iterator' suffix.
+        """
+        import re
+
+        class_name = type(self).__name__
+        if class_name.endswith("Iterator"):
+            class_name = class_name[:-8]  # Remove 'Iterator' suffix
+        # Convert CamelCase to snake_case
+        class_name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", class_name)
+        class_name = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", class_name)
+        return class_name.lower()
+
+    def _make_advance_symbol(self) -> str:
+        """Generate symbol name for advance operation."""
+        return f"{self._get_symbol_prefix()}_advance_{self._get_uid()}"
+
+    def _make_input_deref_symbol(self) -> str:
+        """Generate symbol name for input dereference operation."""
+        return f"{self._get_symbol_prefix()}_input_deref_{self._get_uid()}"
+
+    def _make_output_deref_symbol(self) -> str:
+        """Generate symbol name for output dereference operation."""
+        return f"{self._get_symbol_prefix()}_output_deref_{self._get_uid()}"
+
+    def _collect_child_ltoirs(self, op_type: str) -> list[bytes]:
+        """Collect LTOIRs from all children for the specified operation type."""
+        extras = []
+        for child in self.children:
+            if op_type == "advance":
+                _, ltoir, child_extras = child.get_advance_ltoir()
+                extras.extend([ltoir] + child_extras)
+            elif op_type == "input_deref":
+                result = child.get_input_dereference_ltoir()
+                if result is not None:
+                    _, ltoir, child_extras = result
+                    extras.extend([ltoir] + child_extras)
+            elif op_type == "output_deref":
+                result = child.get_output_dereference_ltoir()
+                if result is not None:
+                    _, ltoir, child_extras = result
+                    extras.extend([ltoir] + child_extras)
+        return extras
+
     def _compile_if_needed(self) -> None:
         """Compile the iterator ops if not already compiled."""
         if self._advance_ltoir is not None:
@@ -104,47 +168,63 @@ class IteratorBase:
 
         from .._cpp_codegen import compile_cpp_to_ltoir
 
+        # Ensure children are compiled first
+        for child in self.children:
+            child._compile_if_needed()
+
         # Compile advance
-        adv_symbol, adv_source = self._generate_advance_source()
+        adv_symbol, adv_source, adv_self_extras = self._generate_advance_source()
         adv_ltoir = compile_cpp_to_ltoir(adv_source, (adv_symbol,))
-        self._advance_ltoir = (adv_symbol, adv_ltoir)
+        adv_child_extras = self._collect_child_ltoirs("advance")
+        self._advance_ltoir = (
+            adv_symbol,
+            adv_ltoir,
+            adv_child_extras + adv_self_extras,
+        )
 
         # Compile input dereference if available
         input_deref = self._generate_input_deref_source()
         if input_deref is not None:
-            in_symbol, in_source = input_deref
+            in_symbol, in_source, in_self_extras = input_deref
             in_ltoir = compile_cpp_to_ltoir(in_source, (in_symbol,))
-            self._input_deref_ltoir = (in_symbol, in_ltoir)
+            in_child_extras = self._collect_child_ltoirs("input_deref")
+            self._input_deref_ltoir = (
+                in_symbol,
+                in_ltoir,
+                in_child_extras + in_self_extras,
+            )
 
         # Compile output dereference if available
         output_deref = self._generate_output_deref_source()
         if output_deref is not None:
-            out_symbol, out_source = output_deref
+            out_symbol, out_source, out_self_extras = output_deref
             out_ltoir = compile_cpp_to_ltoir(out_source, (out_symbol,))
-            self._output_deref_ltoir = (out_symbol, out_ltoir)
+            out_child_extras = self._collect_child_ltoirs("output_deref")
+            self._output_deref_ltoir = (
+                out_symbol,
+                out_ltoir,
+                out_child_extras + out_self_extras,
+            )
 
     def get_advance_ltoir(self) -> tuple[str, bytes, list[bytes]]:
         """Get the LTOIR for the advance operation."""
         self._compile_if_needed()
         assert self._advance_ltoir is not None
-        name, ltoir = self._advance_ltoir
-        return (name, ltoir, [])  # Simple iterators have no extra deps
+        return self._advance_ltoir
 
     def get_input_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
         """Get the LTOIR for input dereference operation."""
         self._compile_if_needed()
         if self._input_deref_ltoir is None:
             return None
-        name, ltoir = self._input_deref_ltoir
-        return (name, ltoir, [])
+        return self._input_deref_ltoir
 
     def get_output_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
         """Get the LTOIR for output dereference operation."""
         self._compile_if_needed()
         if self._output_deref_ltoir is None:
             return None
-        name, ltoir = self._output_deref_ltoir
-        return (name, ltoir, [])
+        return self._output_deref_ltoir
 
     @property
     def is_input_iterator(self) -> bool:
@@ -213,16 +293,16 @@ class IteratorBase:
         return (type(self).__name__, self._value_type)
 
     # Abstract methods for subclasses
-    def _generate_advance_source(self) -> tuple[str, str]:
-        """Generate C++ source for advance operation. Returns (symbol, source)."""
+    def _generate_advance_source(self) -> tuple[str, str, list[bytes]]:
+        """Generate C++ source for advance operation. Returns (symbol, source, extra_ltoirs)."""
         raise NotImplementedError
 
-    def _generate_input_deref_source(self) -> tuple[str, str] | None:
-        """Generate C++ source for input dereference. Returns (symbol, source) or None."""
+    def _generate_input_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        """Generate C++ source for input dereference. Returns (symbol, source, extra_ltoirs) or None."""
         raise NotImplementedError
 
-    def _generate_output_deref_source(self) -> tuple[str, str] | None:
-        """Generate C++ source for output dereference. Returns (symbol, source) or None."""
+    def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        """Generate C++ source for output dereference. Returns (symbol, source, extra_ltoirs) or None."""
         raise NotImplementedError
 
 

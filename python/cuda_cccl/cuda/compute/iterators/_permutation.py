@@ -6,10 +6,18 @@
 
 from __future__ import annotations
 
+from textwrap import dedent
 from typing import TYPE_CHECKING
 
-from .._cpp_codegen import compile_cpp_to_ltoir, cpp_type_from_descriptor
-from ._base import IteratorBase, _deterministic_suffix
+from .._cpp_codegen import cpp_type_from_descriptor
+from ._base import IteratorBase
+from ._codegen_utils import (
+    ADVANCE_TEMPLATE,
+    INPUT_DEREF_TEMPLATE,
+    OUTPUT_DEREF_TEMPLATE,
+    compose_iterator_states,
+    format_template,
+)
 
 if TYPE_CHECKING:
     pass
@@ -38,12 +46,8 @@ class PermutationIterator(IteratorBase):
     __slots__ = [
         "_values",
         "_indices",
-        "_uid",
         "_values_offset",
         "_indices_offset",
-        "_advance_result",
-        "_input_deref_result",
-        "_output_deref_result",
     ]
 
     def __init__(
@@ -62,24 +66,12 @@ class PermutationIterator(IteratorBase):
         self._values = _ensure_iterator(values)
         self._indices = _ensure_iterator(indices)
 
-        # State contains both iterators' states concatenated
-        values_state = bytes(memoryview(self._values.state))
-        indices_state = bytes(memoryview(self._indices.state))
-
-        values_size = len(values_state)
-        indices_align = self._indices.state_alignment
-        padding = (indices_align - (values_size % indices_align)) % indices_align
-
-        state_bytes = values_state + (b"\x00" * padding) + indices_state
-        state_alignment = max(
-            self._values.state_alignment, self._indices.state_alignment
+        # Compose states from both iterators
+        state_bytes, state_alignment, offsets = compose_iterator_states(
+            [self._values, self._indices]
         )
-        self._values_offset = 0
-        self._indices_offset = values_size + padding
-
-        self._advance_result: tuple[str, bytes, list[bytes]] | None = None
-        self._input_deref_result: tuple[str, bytes, list[bytes]] | None = None
-        self._output_deref_result: tuple[str, bytes, list[bytes]] | None = None
+        self._values_offset = offsets[0]
+        self._indices_offset = offsets[1]
 
         super().__init__(
             state_bytes=state_bytes,
@@ -87,173 +79,110 @@ class PermutationIterator(IteratorBase):
             value_type=self._values.value_type,
         )
 
-        # Generate deterministic suffix after super().__init__() so self.kind is available
-        self._uid = _deterministic_suffix(self.kind)
+    def _generate_advance_source(self) -> tuple[str, str, list[bytes]]:
+        """Generate advance that only advances indices iterator."""
+        indices_advance, _, _ = self._indices.get_advance_ltoir()
+        symbol = self._make_advance_symbol()
 
-    def _compile_if_needed(self) -> None:
-        if self._advance_result is not None:
-            return
+        body = dedent(f"""
+            char* indices_state = static_cast<char*>(state) + {self._indices_offset};
+            {indices_advance}(indices_state, offset);
+        """).strip()
 
-        # Get indices iterator ops
-        idx_adv_name, idx_adv_ltoir, idx_adv_extras = self._indices.get_advance_ltoir()
+        source = format_template(
+            ADVANCE_TEMPLATE, symbol=symbol, body=body, extern_symbols=[indices_advance]
+        )
+        return (symbol, source, [])
 
+    def _generate_input_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        """Generate input deref that reads index then accesses values."""
         idx_result = self._indices.get_input_dereference_ltoir()
         if idx_result is None:
             raise ValueError("Indices iterator must support input dereference")
-        idx_deref_name, idx_deref_ltoir, idx_deref_extras = idx_result
+        indices_deref, _, _ = idx_result
 
-        # Get values iterator ops
-        val_adv_name, val_adv_ltoir, val_adv_extras = self._values.get_advance_ltoir()
-
-        # Compile advance (only advances indices)
-        symbol, ltoir = self._compile_advance(idx_adv_name)
-        self._advance_result = (symbol, ltoir, [idx_adv_ltoir] + idx_adv_extras)
-
-        # Input dereference
         val_in_result = self._values.get_input_dereference_ltoir()
-        if val_in_result is not None:
-            val_deref_name, val_deref_ltoir, val_deref_extras = val_in_result
-            symbol, ltoir = self._compile_input_deref(
-                idx_deref_name, val_adv_name, val_deref_name
-            )
-            self._input_deref_result = (
-                symbol,
-                ltoir,
-                [idx_deref_ltoir]
-                + idx_deref_extras
-                + [val_adv_ltoir]
-                + val_adv_extras
-                + [val_deref_ltoir]
-                + val_deref_extras,
-            )
+        if val_in_result is None:
+            return None
+        values_deref, _, _ = val_in_result
 
-        # Output dereference
+        # Also need values advance for random access
+        values_advance, val_adv_ltoir, val_adv_extras = self._values.get_advance_ltoir()
+
+        symbol = self._make_input_deref_symbol()
+        idx_type = cpp_type_from_descriptor(self._indices.value_type)
+        values_state_size = len(bytes(memoryview(self._values.state)))
+
+        body = dedent(f"""
+            char* values_state = static_cast<char*>(state) + {self._values_offset};
+            char* indices_state = static_cast<char*>(state) + {self._indices_offset};
+
+            alignas({self._indices.value_type.alignment}) {idx_type} idx;
+            {indices_deref}(indices_state, &idx);
+
+            alignas({self._values.state_alignment}) char temp_values[{values_state_size}];
+            memcpy(temp_values, values_state, {values_state_size});
+
+            uint64_t offset = static_cast<uint64_t>(idx);
+            {values_advance}(temp_values, &offset);
+            {values_deref}(temp_values, result);
+        """).strip()
+
+        source = format_template(
+            INPUT_DEREF_TEMPLATE,
+            symbol=symbol,
+            body=body,
+            extern_symbols=[indices_deref, values_advance, values_deref],
+        )
+        # Include values.advance since we reference it
+        return (symbol, source, [val_adv_ltoir] + val_adv_extras)
+
+    def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        """Generate output deref that reads index then writes to values."""
+        idx_result = self._indices.get_input_dereference_ltoir()
+        if idx_result is None:
+            raise ValueError("Indices iterator must support input dereference")
+        indices_deref, _, _ = idx_result
+
         val_out_result = self._values.get_output_dereference_ltoir()
-        if val_out_result is not None:
-            val_out_name, val_out_ltoir, val_out_extras = val_out_result
-            symbol, ltoir = self._compile_output_deref(
-                idx_deref_name, val_adv_name, val_out_name
-            )
-            self._output_deref_result = (
-                symbol,
-                ltoir,
-                [idx_deref_ltoir]
-                + idx_deref_extras
-                + [val_adv_ltoir]
-                + val_adv_extras
-                + [val_out_ltoir]
-                + val_out_extras,
-            )
+        if val_out_result is None:
+            return None
+        values_deref, _, _ = val_out_result
 
-    def _compile_advance(self, indices_advance: str) -> tuple[str, bytes]:
-        symbol = f"permutation_advance_{self._uid}"
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
+        # Also need values advance for random access
+        values_advance, val_adv_ltoir, val_adv_extras = self._values.get_advance_ltoir()
 
-extern "C" __device__ void {indices_advance}(void*, void*);
-
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    char* indices_state = static_cast<char*>(state) + {self._indices_offset};
-    {indices_advance}(indices_state, offset);
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
-
-    def _compile_input_deref(
-        self,
-        indices_deref: str,
-        values_advance: str,
-        values_deref: str,
-    ) -> tuple[str, bytes]:
-        symbol = f"permutation_input_deref_{self._uid}"
+        symbol = self._make_output_deref_symbol()
         idx_type = cpp_type_from_descriptor(self._indices.value_type)
         values_state_size = len(bytes(memoryview(self._values.state)))
 
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-#include <cuda/std/cstring>
+        body = dedent(f"""
+            char* values_state = static_cast<char*>(state) + {self._values_offset};
+            char* indices_state = static_cast<char*>(state) + {self._indices_offset};
 
-extern "C" __device__ void {indices_deref}(void*, void*);
-extern "C" __device__ void {values_advance}(void*, void*);
-extern "C" __device__ void {values_deref}(void*, void*);
+            alignas({self._indices.value_type.alignment}) {idx_type} idx;
+            {indices_deref}(indices_state, &idx);
 
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    char* values_state = static_cast<char*>(state) + {self._values_offset};
-    char* indices_state = static_cast<char*>(state) + {self._indices_offset};
+            alignas({self._values.state_alignment}) char temp_values[{values_state_size}];
+            memcpy(temp_values, values_state, {values_state_size});
 
-    alignas({self._indices.value_type.alignment}) {idx_type} idx;
-    {indices_deref}(indices_state, &idx);
+            uint64_t offset = static_cast<uint64_t>(idx);
+            {values_advance}(temp_values, &offset);
+            {values_deref}(temp_values, value);
+        """).strip()
 
-    alignas({self._values.state_alignment}) char temp_values[{values_state_size}];
-    memcpy(temp_values, values_state, {values_state_size});
-
-    uint64_t offset = static_cast<uint64_t>(idx);
-    {values_advance}(temp_values, &offset);
-    {values_deref}(temp_values, result);
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
-
-    def _compile_output_deref(
-        self,
-        indices_deref: str,
-        values_advance: str,
-        values_deref: str,
-    ) -> tuple[str, bytes]:
-        symbol = f"permutation_output_deref_{self._uid}"
-        idx_type = cpp_type_from_descriptor(self._indices.value_type)
-        values_state_size = len(bytes(memoryview(self._values.state)))
-
-        source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-#include <cuda/std/cstring>
-
-extern "C" __device__ void {indices_deref}(void*, void*);
-extern "C" __device__ void {values_advance}(void*, void*);
-extern "C" __device__ void {values_deref}(void*, void*);
-
-extern "C" __device__ void {symbol}(void* state, void* value) {{
-    char* values_state = static_cast<char*>(state) + {self._values_offset};
-    char* indices_state = static_cast<char*>(state) + {self._indices_offset};
-
-    alignas({self._indices.value_type.alignment}) {idx_type} idx;
-    {indices_deref}(indices_state, &idx);
-
-    alignas({self._values.state_alignment}) char temp_values[{values_state_size}];
-    memcpy(temp_values, values_state, {values_state_size});
-
-    uint64_t offset = static_cast<uint64_t>(idx);
-    {values_advance}(temp_values, &offset);
-    {values_deref}(temp_values, value);
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source, (symbol,))
-        return (symbol, ltoir)
+        source = format_template(
+            OUTPUT_DEREF_TEMPLATE,
+            symbol=symbol,
+            body=body,
+            extern_symbols=[indices_deref, values_advance, values_deref],
+        )
+        # Include values.advance since we reference it
+        return (symbol, source, [val_adv_ltoir] + val_adv_extras)
 
     @property
     def children(self):
         return (self._values, self._indices)
-
-    def get_advance_ltoir(self) -> tuple[str, bytes, list[bytes]]:
-        self._compile_if_needed()
-        assert self._advance_result is not None
-        return self._advance_result
-
-    def get_input_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
-        self._compile_if_needed()
-        return self._input_deref_result
-
-    def get_output_dereference_ltoir(self) -> tuple[str, bytes, list[bytes]] | None:
-        self._compile_if_needed()
-        return self._output_deref_result
 
     @property
     def is_input_iterator(self) -> bool:

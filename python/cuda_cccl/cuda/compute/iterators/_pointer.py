@@ -7,14 +7,20 @@
 from __future__ import annotations
 
 import ctypes
-import math
 import sys
+from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from .._cpp_codegen import cpp_type_from_descriptor
 from .._utils.protocols import get_data_pointer, get_dtype
 from ..types import from_numpy_dtype
-from ._base import IteratorBase, _deterministic_suffix
+from ._base import IteratorBase
+from ._codegen_utils import (
+    ADVANCE_TEMPLATE,
+    INPUT_DEREF_TEMPLATE,
+    OUTPUT_DEREF_TEMPLATE,
+    format_template,
+)
 
 if TYPE_CHECKING:
     pass
@@ -65,99 +71,64 @@ class PointerIterator(IteratorBase):
             value_type=value_type,
         )
 
-        # Generate deterministic suffix after super().__init__() so self.kind is available
-        self._uid = _deterministic_suffix(self.kind)
-
-    def _generate_advance_source(self) -> tuple[str, str]:
-        symbol = f"pointer_advance_{self._uid}"
+    def _generate_advance_source(self) -> tuple[str, str, list[bytes]]:
+        symbol = self._make_advance_symbol()
 
         if self._cpp_type:
             # Scalar type - use typed pointer arithmetic
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    auto* ptr_state = static_cast<{self._cpp_type}**>(state);
-    auto dist = *static_cast<int64_t*>(offset);
-    *ptr_state += dist;
-}}
-"""
+            body = dedent(f"""
+            auto* ptr_state = static_cast<{self._cpp_type}**>(state);
+            auto dist = *static_cast<int64_t*>(offset);
+            *ptr_state += dist;
+        """).strip()
         else:
             # Struct type - use byte-level pointer arithmetic
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
+            body = dedent(f"""
+            auto* ptr_state = static_cast<char**>(state);
+            auto dist = *static_cast<int64_t*>(offset);
+            *ptr_state += dist * {self._element_size};
+        """).strip()
 
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    auto* ptr_state = static_cast<char**>(state);
-    auto dist = *static_cast<int64_t*>(offset);
-    *ptr_state += dist * {self._element_size};
-}}
-"""
-        return (symbol, source)
+        source = format_template(ADVANCE_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
-    def _generate_input_deref_source(self) -> tuple[str, str] | None:
-        symbol = f"pointer_input_deref_{self._uid}"
+    def _generate_input_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        symbol = self._make_input_deref_symbol()
 
         if self._cpp_type:
             # Scalar type - use typed dereference
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    auto* ptr_state = static_cast<{self._cpp_type}**>(state);
-    *static_cast<{self._cpp_type}*>(result) = **ptr_state;
-}}
-"""
+            body = dedent(f"""
+            auto* ptr_state = static_cast<{self._cpp_type}**>(state);
+            *static_cast<{self._cpp_type}*>(result) = **ptr_state;
+        """).strip()
+            source = format_template(INPUT_DEREF_TEMPLATE, symbol=symbol, body=body)
         else:
             # Struct type - use memcpy
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-#include <cuda/std/cstring>
-using namespace cuda::std;
+            body = dedent(f"""
+            auto* ptr_state = static_cast<char**>(state);
+            memcpy(result, *ptr_state, {self._element_size});
+        """).strip()
+            source = format_template(INPUT_DEREF_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    auto* ptr_state = static_cast<char**>(state);
-    memcpy(result, *ptr_state, {self._element_size});
-}}
-"""
-        return (symbol, source)
-
-    def _generate_output_deref_source(self) -> tuple[str, str] | None:
-        symbol = f"pointer_output_deref_{self._uid}"
+    def _generate_output_deref_source(self) -> tuple[str, str, list[bytes]] | None:
+        symbol = self._make_output_deref_symbol()
 
         if self._cpp_type:
             # Scalar type - use typed dereference
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* value) {{
-    auto* ptr_state = static_cast<{self._cpp_type}**>(state);
-    **ptr_state = *static_cast<{self._cpp_type}*>(value);
-}}
-"""
+            body = dedent(f"""
+            auto* ptr_state = static_cast<{self._cpp_type}**>(state);
+            **ptr_state = *static_cast<{self._cpp_type}*>(value);
+        """).strip()
+            source = format_template(OUTPUT_DEREF_TEMPLATE, symbol=symbol, body=body)
         else:
             # Struct type - use memcpy
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda_fp16.h>
-#include <cuda/std/cstring>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* value) {{
-    auto* ptr_state = static_cast<char**>(state);
-    memcpy(*ptr_state, value, {self._element_size});
-}}
-"""
-        return (symbol, source)
+            body = dedent(f"""
+            auto* ptr_state = static_cast<char**>(state);
+            memcpy(*ptr_state, value, {self._element_size});
+        """).strip()
+            source = format_template(OUTPUT_DEREF_TEMPLATE, symbol=symbol, body=body)
+        return (symbol, source, [])
 
     def __add__(self, offset: int):
         dtype = get_dtype(self._array)
@@ -183,177 +154,8 @@ extern "C" __device__ void {symbol}(void* state, void* value) {{
         clone._advance_ltoir = None
         clone._input_deref_ltoir = None
         clone._output_deref_ltoir = None
-        clone._uid = _deterministic_suffix(clone.kind)
+        clone._uid_cached = None
         return clone
-
-    @property
-    def kind(self):
-        """
-        Return a hashable kind for caching purposes.
-
-        Include _cpp_type and _element_size since they affect generated code.
-        Different code paths are taken for scalar vs struct types.
-        """
-        return (
-            type(self).__name__,
-            self._value_type,
-            self._cpp_type,
-            self._element_size,
-        )
-
-
-class PointerIteratorAtOffset(IteratorBase):
-    """
-    Pointer iterator that starts at an offset from the end of an array.
-
-    Used by ReverseIterator to start at the last element.
-    """
-
-    def __init__(self, array, offset_from_end: int = 0):
-        """
-        Create a pointer iterator at an offset from the end.
-
-        Args:
-            array: Device array with __cuda_array_interface__
-            offset_from_end: How many elements from the end (1 = last element)
-        """
-        # Get pointer and dtype from array
-        ptr = get_data_pointer(array)
-        dtype = get_dtype(array)
-        value_type = from_numpy_dtype(dtype)
-
-        # Calculate the offset pointer
-        # For offset_from_end=1, we want ptr + (len-1) * itemsize
-        if hasattr(array, "size"):
-            array_len = int(array.size)
-        elif hasattr(array, "shape"):
-            array_len = int(math.prod(array.shape))
-        else:
-            array_len = len(array)
-        offset_ptr = ptr + (array_len - offset_from_end) * dtype.itemsize
-
-        self._set_pointer_bytes(offset_ptr)
-
-        self._cpp_type = _try_get_cpp_type(value_type)  # None for struct types
-        self._element_size = value_type.info.size
-        self._array = array  # Keep reference to prevent GC
-
-        super().__init__(
-            state_bytes=self._state_bytes,
-            state_alignment=8,  # pointer alignment
-            value_type=value_type,
-        )
-
-        # Generate deterministic suffix after super().__init__() so self.kind is available
-        self._uid = _deterministic_suffix(self.kind)
-
-    def _set_pointer_bytes(self, pointer_value: int) -> None:
-        state_ptr = ctypes.c_void_p(pointer_value)
-        state_bytes_buffer = (ctypes.c_char * 8)()
-        ctypes.memmove(state_bytes_buffer, ctypes.byref(state_ptr), 8)
-        self._state_bytes = bytes(state_bytes_buffer)
-
-    def _clone_with_pointer(self, pointer_value: int):
-        clone = PointerIteratorAtOffset.__new__(PointerIteratorAtOffset)
-        clone._cpp_type = self._cpp_type
-        clone._element_size = self._element_size
-        clone._array = self._array
-        clone._set_pointer_bytes(pointer_value)
-        clone._state_alignment = 8
-        clone._value_type = self._value_type
-        clone._advance_ltoir = None
-        clone._input_deref_ltoir = None
-        clone._output_deref_ltoir = None
-        # Generate deterministic suffix based on kind
-        clone._uid = _deterministic_suffix(clone.kind)
-        return clone
-
-    def _generate_advance_source(self) -> tuple[str, str]:
-        symbol = f"pointer_advance_{self._uid}"
-
-        if self._cpp_type:
-            source = f"""
-#include <cuda/std/cstdint>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    auto* ptr_state = static_cast<{self._cpp_type}**>(state);
-    auto dist = *static_cast<int64_t*>(offset);
-    *ptr_state += dist;
-}}
-"""
-        else:
-            source = f"""
-#include <cuda/std/cstdint>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* offset) {{
-    auto* ptr_state = static_cast<char**>(state);
-    auto dist = *static_cast<int64_t*>(offset);
-    *ptr_state += dist * {self._element_size};
-}}
-"""
-        return (symbol, source)
-
-    def _generate_input_deref_source(self) -> tuple[str, str] | None:
-        symbol = f"pointer_input_deref_{self._uid}"
-
-        if self._cpp_type:
-            source = f"""
-#include <cuda/std/cstdint>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    auto* ptr_state = static_cast<{self._cpp_type}**>(state);
-    *static_cast<{self._cpp_type}*>(result) = **ptr_state;
-}}
-"""
-        else:
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda/std/cstring>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* result) {{
-    auto* ptr_state = static_cast<char**>(state);
-    memcpy(result, *ptr_state, {self._element_size});
-}}
-"""
-        return (symbol, source)
-
-    def _generate_output_deref_source(self) -> tuple[str, str] | None:
-        symbol = f"pointer_output_deref_{self._uid}"
-
-        if self._cpp_type:
-            source = f"""
-#include <cuda/std/cstdint>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* value) {{
-    auto* ptr_state = static_cast<{self._cpp_type}**>(state);
-    **ptr_state = *static_cast<{self._cpp_type}*>(value);
-}}
-"""
-        else:
-            source = f"""
-#include <cuda/std/cstdint>
-#include <cuda/std/cstring>
-using namespace cuda::std;
-
-extern "C" __device__ void {symbol}(void* state, void* value) {{
-    auto* ptr_state = static_cast<char**>(state);
-    memcpy(*ptr_state, value, {self._element_size});
-}}
-"""
-        return (symbol, source)
-
-    def __add__(self, offset: int):
-        dtype = get_dtype(self._array)
-        offset_ptr = self._current_pointer() + offset * dtype.itemsize
-        return self._clone_with_pointer(offset_ptr)
-
-    def _current_pointer(self) -> int:
-        return int.from_bytes(self._state_bytes, sys.byteorder, signed=False)
 
     @property
     def kind(self):
