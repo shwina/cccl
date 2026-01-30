@@ -82,6 +82,7 @@ class Op:
         ltoir=None,
         state=None,
         state_alignment: int = 1,
+        extra_ltoirs=None,
     ): ...
     @property
     def state(self) -> bytes: ...
