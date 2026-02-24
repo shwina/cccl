@@ -14,8 +14,6 @@
 
 #include <thrust/system/cuda/config.h>
 
-#include <cuda/cmath>
-
 THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub::detail

@@ -21,7 +21,8 @@
 #include <cub/util_device.cuh>
 #include <cub/util_type.cuh>
 
-#include <cuda/cmath>
+#include <cuda/std/__algorithm/max.h>
+#include <cuda/std/__algorithm/min.h>
 #include <cuda/std/__algorithm/clamp.h>
 
 CUB_NAMESPACE_BEGIN

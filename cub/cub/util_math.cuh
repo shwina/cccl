@@ -18,7 +18,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cuda/cmath>
 #include <cuda/std/__algorithm/max.h>
 #include <cuda/std/__algorithm/min.h>
 #include <cuda/std/__type_traits/integral_constant.h>
