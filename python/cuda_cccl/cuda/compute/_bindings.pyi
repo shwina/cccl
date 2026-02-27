@@ -552,3 +552,49 @@ class DeviceThreeWayPartitionBuildResult:
         num_items: int,
         stream,
     ) -> int: ...
+
+# ---------------------
+# C-backed iterator factory functions
+# ---------------------
+
+def _get_iter_build_params() -> tuple[int, int, bytes, bytes]: ...
+def make_counting_iterator_ops(value_type: TypeInfo, state_bytes: bytes) -> tuple[Op, Op]: ...
+def make_constant_iterator_ops(value_type: TypeInfo, state_bytes: bytes) -> tuple[Op, Op]: ...
+def make_discard_iterator_ops(value_type: TypeInfo, state_bytes: bytes) -> tuple[Op, Op]: ...
+def make_pointer_iterator_ops(
+    value_type: TypeInfo,
+    state_bytes: bytes,
+    is_input: bool,
+    is_output: bool,
+) -> tuple[Op, Op]: ...
+def make_cache_modified_input_iterator_ops(
+    value_type: TypeInfo,
+    state_bytes: bytes,
+    modifier: int,
+) -> tuple[Op, Op]: ...
+def make_reverse_iterator_ops(underlying: Iterator) -> tuple[Op, Op]: ...
+def make_zip_iterator_ops(
+    children: list[Iterator],
+    state_offsets: list[int],
+    value_offsets: list[int],
+    state_bytes: bytes,
+    state_size: int,
+    state_alignment: int,
+    value_type: TypeInfo,
+) -> tuple[Op, Op]: ...
+def make_permutation_iterator_ops(
+    values_iter: Iterator,
+    indices_iter: Iterator,
+    values_offset: int,
+    indices_offset: int,
+    state_bytes: bytes,
+    state_size: int,
+    state_alignment: int,
+) -> tuple[Op, Op]: ...
+def make_shuffle_iterator_ops(state_bytes: bytes) -> tuple[Op, Op]: ...
+def make_transform_iterator_ops(
+    underlying: Iterator,
+    transform_op: Op,
+    value_type: TypeInfo,
+    is_input: bool,
+) -> tuple[Op, Op]: ...

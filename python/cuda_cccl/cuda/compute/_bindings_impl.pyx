@@ -2646,3 +2646,621 @@ cdef class DeviceSegmentedSortBuildResult:
             <const char*>self.build_data.cubin,
             self.build_data.cubin_size
         )
+
+
+# ===========================================================================
+# C-backed iterator factory functions
+# ===========================================================================
+
+from libc.string cimport strlen as _c_strlen
+
+cdef extern from "cccl/c/iterators.h":
+    ctypedef enum _cccl_cache_modifier_c "cccl_cache_modifier_t":
+        _CCCL_LOAD_DEFAULT "CCCL_LOAD_DEFAULT"
+        _CCCL_LOAD_CA "CCCL_LOAD_CA"
+        _CCCL_LOAD_CG "CCCL_LOAD_CG"
+        _CCCL_LOAD_CS "CCCL_LOAD_CS"
+        _CCCL_LOAD_CV "CCCL_LOAD_CV"
+        _CCCL_LOAD_LDG "CCCL_LOAD_LDG"
+        _CCCL_LOAD_VOLATILE "CCCL_LOAD_VOLATILE"
+
+    CUresult cccl_make_counting_iterator(
+        cccl_iterator_t*, cccl_type_info, const void*,
+        int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_constant_iterator(
+        cccl_iterator_t*, cccl_type_info, const void*,
+        int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_discard_iterator(
+        cccl_iterator_t*, cccl_type_info, const void*,
+        int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_pointer_iterator(
+        cccl_iterator_t*, cccl_type_info, const void*,
+        int, int, int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_cache_modified_input_iterator(
+        cccl_iterator_t*, cccl_type_info, const void*,
+        _cccl_cache_modifier_c, int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_reverse_iterator(
+        cccl_iterator_t*, cccl_iterator_t,
+        int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_zip_iterator(
+        cccl_iterator_t*,
+        const cccl_iterator_t*, const size_t*, const size_t*, size_t,
+        const void*, size_t, size_t,
+        cccl_type_info,
+        int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_permutation_iterator(
+        cccl_iterator_t*, cccl_iterator_t, cccl_iterator_t,
+        size_t, size_t, const void*, size_t, size_t,
+        int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_shuffle_iterator(
+        cccl_iterator_t*, const void*,
+        int, int, const char*, const char*) nogil
+
+    CUresult cccl_make_transform_iterator(
+        cccl_iterator_t*, cccl_iterator_t, cccl_op_t, cccl_type_info, int,
+        int, int, const char*, const char*) nogil
+
+    void cccl_destroy_iterator(cccl_iterator_t*) nogil
+
+
+import functools as _functools_iter
+
+
+@_functools_iter.lru_cache(maxsize=1)
+def _get_iter_build_params():
+    """
+    Return (cc_major, cc_minor, libcudacxx_path_bytes, ctk_path_bytes)
+    for iterator LTOIR compilation.  Cached after the first call.
+    """
+    try:
+        from cuda.core import Device as _Device
+    except ImportError:
+        from cuda.core.experimental import Device as _Device
+    from cuda.cccl import get_include_paths as _gip
+
+    cc_major, cc_minor = _Device().compute_capability
+    paths = _gip().as_tuple()
+    # paths = (cub_path, thrust_path, libcudacxx_path, ctk_path)
+
+    def _as_flag(p):
+        if p is None:
+            return b""
+        return f"-I{p}".encode("utf-8")
+
+    return (int(cc_major), int(cc_minor), _as_flag(paths[2]), _as_flag(paths[3]))
+
+
+cdef Op _op_from_c_op(const cccl_op_t* c_op):
+    """Build a Python Op by deep-copying data from a C cccl_op_t."""
+    cdef bytes name_py = b""
+    cdef bytes code_py = b""
+    cdef list extras = []
+    cdef size_t i
+
+    if c_op.name != NULL:
+        name_py = PyBytes_FromStringAndSize(c_op.name, _c_strlen(c_op.name))
+    if c_op.code != NULL and c_op.code_size > 0:
+        code_py = PyBytes_FromStringAndSize(c_op.code, c_op.code_size)
+    for i in range(c_op.num_extra_ltoirs):
+        if c_op.extra_ltoirs[i] != NULL and c_op.extra_ltoir_sizes[i] > 0:
+            extras.append(PyBytes_FromStringAndSize(
+                c_op.extra_ltoirs[i], c_op.extra_ltoir_sizes[i]))
+
+    return Op(
+        name=name_py.decode("utf-8"),
+        operator_type=OpKind.STATELESS,
+        ltoir=code_py,
+        extra_ltoirs=extras,
+    )
+
+
+def make_counting_iterator_ops(TypeInfo value_type, bytes state_bytes):
+    """
+    Compile advance + deref ops for CountingIterator via C.
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef const void* state_ptr
+    cdef cccl_type_info type_info
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    state_ptr = <const void*><const char*>state_bytes if state_bytes else NULL
+    type_info = value_type.type_info
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_counting_iterator(
+            &result, type_info, state_ptr,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_counting_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op
+
+
+def make_constant_iterator_ops(TypeInfo value_type, bytes state_bytes):
+    """
+    Compile advance + deref ops for ConstantIterator via C.
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef const void* state_ptr
+    cdef cccl_type_info type_info
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    state_ptr = <const void*><const char*>state_bytes if state_bytes else NULL
+    type_info = value_type.type_info
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_constant_iterator(
+            &result, type_info, state_ptr,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_constant_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op
+
+
+def make_discard_iterator_ops(TypeInfo value_type, bytes state_bytes):
+    """
+    Compile advance + deref ops for DiscardIterator via C.
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef const void* state_ptr
+    cdef cccl_type_info type_info
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    state_ptr = <const void*><const char*>state_bytes if state_bytes else NULL
+    type_info = value_type.type_info
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_discard_iterator(
+            &result, type_info, state_ptr,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_discard_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op
+
+
+def make_pointer_iterator_ops(TypeInfo value_type, bytes state_bytes,
+                               bint is_input, bint is_output):
+    """
+    Compile advance + deref ops for PointerIterator via C.
+
+    Args:
+        value_type: TypeInfo for the element type
+        state_bytes: 8-byte pointer value
+        is_input: True to generate an input (read) dereference op
+        is_output: True to generate an output (write) dereference op
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef const void* state_ptr
+    cdef cccl_type_info type_info
+    cdef cccl_iterator_t result
+    cdef CUresult status
+    cdef int c_is_input = 1 if is_input else 0
+    cdef int c_is_output = 1 if is_output else 0
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    state_ptr = <const void*><const char*>state_bytes if state_bytes else NULL
+    type_info = value_type.type_info
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_pointer_iterator(
+            &result, type_info, state_ptr,
+            c_is_input, c_is_output,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_pointer_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op
+
+
+def make_cache_modified_input_iterator_ops(TypeInfo value_type, bytes state_bytes,
+                                            int modifier):
+    """
+    Compile advance + deref ops for CacheModifiedInputIterator via C.
+
+    Args:
+        value_type: TypeInfo for the element type
+        state_bytes: 8-byte pointer value
+        modifier: Cache modifier integer value (from cccl_cache_modifier_t)
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef const void* state_ptr
+    cdef cccl_type_info type_info
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    state_ptr = <const void*><const char*>state_bytes if state_bytes else NULL
+    type_info = value_type.type_info
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_cache_modified_input_iterator(
+            &result, type_info, state_ptr,
+            <_cccl_cache_modifier_c>modifier,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_cache_modified_input_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op
+
+
+def make_reverse_iterator_ops(Iterator underlying):
+    """
+    Compile advance + deref ops for ReverseIterator via C.
+
+    Args:
+        underlying: Pre-constructed underlying Iterator (must have advance + deref ops set)
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef cccl_iterator_t underlying_data
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    # Shallow copy: pointers inside point into Python-owned bytes held by `underlying`
+    underlying_data = underlying.iter_data
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_reverse_iterator(
+            &result, underlying_data,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_reverse_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op
+
+
+def make_zip_iterator_ops(
+    list children,
+    list state_offsets,
+    list value_offsets,
+    bytes state_bytes,
+    size_t state_size,
+    size_t state_alignment,
+    TypeInfo value_type,
+):
+    """
+    Compile advance + deref ops for ZipIterator via C.
+
+    Args:
+        children: List of Iterator objects (each configured with the desired deref op)
+        state_offsets: List of byte offsets of child states in combined state
+        value_offsets: List of byte offsets of child values in combined value struct
+        state_bytes: Combined state bytes
+        state_size: Total combined state size in bytes
+        state_alignment: Alignment of the combined state
+        value_type: TypeInfo for the combined value type
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef size_t n, i
+    cdef cccl_iterator_t* c_children = NULL
+    cdef size_t* c_state_offsets_arr = NULL
+    cdef size_t* c_value_offsets_arr = NULL
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef const void* state_ptr
+    cdef cccl_type_info type_info
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    n = len(children)
+    if n == 0:
+        raise ValueError("ZipIterator requires at least one child")
+
+    c_children = <cccl_iterator_t*>malloc(n * sizeof(cccl_iterator_t))
+    c_state_offsets_arr = <size_t*>malloc(n * sizeof(size_t))
+    c_value_offsets_arr = <size_t*>malloc(n * sizeof(size_t))
+    if c_children == NULL or c_state_offsets_arr == NULL or c_value_offsets_arr == NULL:
+        free(c_children)
+        free(c_state_offsets_arr)
+        free(c_value_offsets_arr)
+        raise MemoryError("Failed to allocate children arrays for make_zip_iterator_ops")
+
+    try:
+        for i in range(n):
+            c_children[i] = (<Iterator>children[i]).iter_data
+            c_state_offsets_arr[i] = <size_t>state_offsets[i]
+            c_value_offsets_arr[i] = <size_t>value_offsets[i]
+
+        cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+        libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+        ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+        state_ptr = <const void*><const char*>state_bytes if state_bytes else NULL
+        type_info = value_type.type_info
+
+        memset(&result, 0, sizeof(result))
+        with nogil:
+            status = cccl_make_zip_iterator(
+                &result,
+                c_children, c_state_offsets_arr, c_value_offsets_arr, n,
+                state_ptr, state_size, state_alignment,
+                type_info,
+                cc_major, cc_minor, libcudacxx, ctk)
+
+        if status != 0:
+            raise RuntimeError(
+                f"cccl_make_zip_iterator failed with error code {status}")
+
+        try:
+            advance_op = _op_from_c_op(&result.advance)
+            deref_op = _op_from_c_op(&result.dereference)
+        finally:
+            cccl_destroy_iterator(&result)
+
+        return advance_op, deref_op
+    finally:
+        free(c_children)
+        free(c_state_offsets_arr)
+        free(c_value_offsets_arr)
+
+
+def make_permutation_iterator_ops(
+    Iterator values_iter,
+    Iterator indices_iter,
+    size_t values_offset,
+    size_t indices_offset,
+    bytes state_bytes,
+    size_t state_size,
+    size_t state_alignment,
+):
+    """
+    Compile advance + deref ops for PermutationIterator via C.
+
+    Args:
+        values_iter: Pre-constructed values Iterator (with input deref op set)
+        indices_iter: Pre-constructed indices Iterator (with input deref op set)
+        values_offset: Byte offset of values state in combined state
+        indices_offset: Byte offset of indices state in combined state
+        state_bytes: Combined state bytes
+        state_size: Total combined state size in bytes
+        state_alignment: Alignment of the combined state
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef const void* state_ptr
+    cdef cccl_iterator_t values_data
+    cdef cccl_iterator_t indices_data
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    state_ptr = <const void*><const char*>state_bytes if state_bytes else NULL
+    # Shallow copies: pointers inside point into Python-owned bytes held by the Iterators
+    values_data = values_iter.iter_data
+    indices_data = indices_iter.iter_data
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_permutation_iterator(
+            &result, values_data, indices_data,
+            values_offset, indices_offset,
+            state_ptr, state_size, state_alignment,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_permutation_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op
+
+
+def make_shuffle_iterator_ops(bytes state_bytes):
+    """
+    Compile advance + deref ops for ShuffleIterator via C.
+
+    Args:
+        state_bytes: 24-byte ShuffleState: {int64_t current_index, uint64_t num_items, uint64_t seed}
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef const void* state_ptr
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    state_ptr = <const void*><const char*>state_bytes if state_bytes else NULL
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_shuffle_iterator(
+            &result, state_ptr,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_shuffle_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op
+
+
+def make_transform_iterator_ops(
+    Iterator underlying,
+    Op transform_op,
+    TypeInfo value_type,
+    bint is_input,
+):
+    """
+    Compile advance + deref ops for TransformIterator via C.
+
+    Args:
+        underlying: Pre-constructed underlying Iterator (with advance + appropriate deref op set)
+        transform_op: Compiled transform Op (name + LTOIR from Numba)
+        value_type: TypeInfo for the iterator's value type
+        is_input: True for input iterator, False for output iterator
+
+    Returns:
+        Tuple[Op, Op]: (advance_op, deref_op)
+    """
+    cdef int cc_major, cc_minor
+    cdef bytes lib_bytes, ctk_bytes
+    cdef const char* libcudacxx
+    cdef const char* ctk
+    cdef cccl_iterator_t underlying_data
+    cdef cccl_op_t c_transform_op
+    cdef cccl_type_info type_info
+    cdef cccl_iterator_t result
+    cdef CUresult status
+
+    cc_major, cc_minor, lib_bytes, ctk_bytes = _get_iter_build_params()
+    libcudacxx = <const char*>lib_bytes if lib_bytes else NULL
+    ctk = <const char*>ctk_bytes if ctk_bytes else NULL
+    # Shallow copies: pointers inside point into Python-owned bytes
+    underlying_data = underlying.iter_data
+    c_transform_op = transform_op.op_data
+    type_info = value_type.type_info
+
+    memset(&result, 0, sizeof(result))
+    with nogil:
+        status = cccl_make_transform_iterator(
+            &result, underlying_data, c_transform_op, type_info, is_input,
+            cc_major, cc_minor, libcudacxx, ctk)
+
+    if status != 0:
+        raise RuntimeError(
+            f"cccl_make_transform_iterator failed with error code {status}")
+
+    try:
+        advance_op = _op_from_c_op(&result.advance)
+        deref_op = _op_from_c_op(&result.dereference)
+    finally:
+        cccl_destroy_iterator(&result)
+    return advance_op, deref_op

@@ -6,12 +6,21 @@
 
 from __future__ import annotations
 
-from textwrap import dedent
-
-from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir, make_variable_declaration
+from .._bindings import Iterator, IteratorKind, Op, make_permutation_iterator_ops
 from ._base import IteratorBase, compose_iterator_states
-from ._common import CUDA_PREAMBLE, ensure_iterator
+from ._common import ensure_iterator
+
+
+def _make_iter_struct(it: IteratorBase, advance_op: Op, deref_op: Op) -> Iterator:
+    """Build a Cython Iterator struct from individual Op objects."""
+    return Iterator(
+        it.state_alignment,
+        IteratorKind.ITERATOR,
+        advance_op,
+        deref_op,
+        it.value_type.info,
+        state=it.state,
+    )
 
 
 class PermutationIterator(IteratorBase):
@@ -66,142 +75,82 @@ class PermutationIterator(IteratorBase):
             value_type=self._values.value_type,
         )
 
+    def _call_c_permutation(
+        self,
+        values_iter: Iterator,
+        indices_iter: Iterator,
+    ) -> tuple:
+        """Call make_permutation_iterator_ops with the given child Iterators."""
+        state_size = len(self._state_bytes)
+        return make_permutation_iterator_ops(
+            values_iter,
+            indices_iter,
+            self._values_offset,
+            self._indices_offset,
+            self._state_bytes,
+            state_size,
+            self._state_alignment,
+        )
+
     def _make_advance_op(self) -> Op:
         """Provide Op for advance that only advances indices iterator."""
-        child_op = self._indices.get_advance_op()
-        symbol = self._make_advance_symbol()
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {child_op.name}(void* state, void* offset);
-
-            extern "C" __device__ void {symbol}(void* state, void* offset) {{
-                char* indices_state = static_cast<char*>(state) + {self._indices_offset};
-                {child_op.name}(indices_state, offset);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[child_op.ltoir, *child_op.extra_ltoirs],
+        indices_advance = self._indices.get_advance_op()
+        # Use any available deref for advance generation (C only uses advance name)
+        indices_deref = (
+            self._indices.get_input_deref_op()
+            or self._indices.get_output_deref_op()
         )
+        if indices_deref is None:
+            raise ValueError("Indices iterator must support at least one dereference")
+
+        values_advance = self._values.get_advance_op()
+        values_deref = (
+            self._values.get_input_deref_op()
+            or self._values.get_output_deref_op()
+        )
+        if values_deref is None:
+            raise ValueError("Values iterator must support at least one dereference")
+
+        values_iter = _make_iter_struct(self._values, values_advance, values_deref)
+        indices_iter = _make_iter_struct(self._indices, indices_advance, indices_deref)
+        advance, _ = self._call_c_permutation(values_iter, indices_iter)
+        return advance
 
     def _make_input_deref_op(self) -> Op | None:
         """Provide Op for input deref that reads index then accesses values."""
-        indices_deref_op = self._indices.get_input_deref_op()
-        if indices_deref_op is None:
+        indices_deref = self._indices.get_input_deref_op()
+        if indices_deref is None:
             raise ValueError("Indices iterator must support input dereference")
 
-        values_deref_op = self._values.get_input_deref_op()
-        if values_deref_op is None:
+        values_deref = self._values.get_input_deref_op()
+        if values_deref is None:
             return None
 
-        # Also need values advance for random access
-        values_advance_op = self._values.get_advance_op()
+        values_advance = self._values.get_advance_op()
+        indices_advance = self._indices.get_advance_op()
 
-        symbol = self._make_input_deref_symbol()
-        idx_decl = make_variable_declaration(self._indices.value_type, "idx")
-        values_state_size = len(bytes(memoryview(self._values.state)))
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {indices_deref_op.name}(void* state, void* result);
-            extern "C" __device__ void {values_advance_op.name}(void* state, void* offset);
-            extern "C" __device__ void {values_deref_op.name}(void* state, void* result);
-
-            extern "C" __device__ void {symbol}(void* state, void* result) {{
-                char* values_state = static_cast<char*>(state) + {self._values_offset};
-                char* indices_state = static_cast<char*>(state) + {self._indices_offset};
-
-                {idx_decl}
-                {indices_deref_op.name}(indices_state, &idx);
-
-                alignas({self._values.state_alignment}) char temp_values[{values_state_size}];
-                memcpy(temp_values, values_state, {values_state_size});
-
-                uint64_t offset = static_cast<uint64_t>(idx);
-                {values_advance_op.name}(temp_values, &offset);
-                {values_deref_op.name}(temp_values, result);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[
-                values_advance_op.ltoir,
-                *values_advance_op.extra_ltoirs,
-                indices_deref_op.ltoir,
-                *indices_deref_op.extra_ltoirs,
-                values_deref_op.ltoir,
-                *values_deref_op.extra_ltoirs,
-            ],
-        )
+        values_iter = _make_iter_struct(self._values, values_advance, values_deref)
+        indices_iter = _make_iter_struct(self._indices, indices_advance, indices_deref)
+        _, deref = self._call_c_permutation(values_iter, indices_iter)
+        return deref
 
     def _make_output_deref_op(self) -> Op | None:
         """Provide Op for output deref that reads index then writes to values."""
-        indices_deref_op = self._indices.get_input_deref_op()
-        if indices_deref_op is None:
+        indices_deref = self._indices.get_input_deref_op()
+        if indices_deref is None:
             raise ValueError("Indices iterator must support input dereference")
 
-        values_deref_op = self._values.get_output_deref_op()
-        if values_deref_op is None:
+        values_deref = self._values.get_output_deref_op()
+        if values_deref is None:
             return None
 
-        # Also need values advance for random access
-        values_advance_op = self._values.get_advance_op()
+        values_advance = self._values.get_advance_op()
+        indices_advance = self._indices.get_advance_op()
 
-        symbol = self._make_output_deref_symbol()
-        idx_decl = make_variable_declaration(self._indices.value_type, "idx")
-        values_state_size = len(bytes(memoryview(self._values.state)))
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {indices_deref_op.name}(void* state, void* result);
-            extern "C" __device__ void {values_advance_op.name}(void* state, void* offset);
-            extern "C" __device__ void {values_deref_op.name}(void* state, void* value);
-
-            extern "C" __device__ void {symbol}(void* state, void* value) {{
-                char* values_state = static_cast<char*>(state) + {self._values_offset};
-                char* indices_state = static_cast<char*>(state) + {self._indices_offset};
-
-                {idx_decl}
-                {indices_deref_op.name}(indices_state, &idx);
-
-                alignas({self._values.state_alignment}) char temp_values[{values_state_size}];
-                memcpy(temp_values, values_state, {values_state_size});
-
-                uint64_t offset = static_cast<uint64_t>(idx);
-                {values_advance_op.name}(temp_values, &offset);
-                {values_deref_op.name}(temp_values, value);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[
-                values_advance_op.ltoir,
-                *values_advance_op.extra_ltoirs,
-                indices_deref_op.ltoir,
-                *indices_deref_op.extra_ltoirs,
-                values_deref_op.ltoir,
-                *values_deref_op.extra_ltoirs,
-            ],
-        )
+        values_iter = _make_iter_struct(self._values, values_advance, values_deref)
+        indices_iter = _make_iter_struct(self._indices, indices_advance, indices_deref)
+        _, deref = self._call_c_permutation(values_iter, indices_iter)
+        return deref
 
     @property
     def children(self):

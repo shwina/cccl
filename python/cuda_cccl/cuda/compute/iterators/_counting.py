@@ -6,15 +6,11 @@
 
 from __future__ import annotations
 
-from textwrap import dedent
-
 import numpy as np
 
-from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir, cpp_type_from_descriptor
+from .._bindings import Op, make_counting_iterator_ops
 from ..types import from_numpy_dtype
 from ._base import IteratorBase
-from ._common import CUDA_PREAMBLE
 
 
 class CountingIterator(IteratorBase):
@@ -57,47 +53,18 @@ class CountingIterator(IteratorBase):
             value_type=value_type,
         )
 
+    def _get_c_ops(self):
+        if not hasattr(self, "_c_ops"):
+            self._c_ops = make_counting_iterator_ops(
+                self._value_type.info, self._state_bytes
+            )
+        return self._c_ops
+
     def _make_advance_op(self) -> Op:
-        symbol = self._make_advance_symbol()
-        cpp_type = cpp_type_from_descriptor(self._value_type)
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {symbol}(void* state, void* offset) {{
-                auto* s = static_cast<{cpp_type}*>(state);
-                auto dist = *static_cast<uint64_t*>(offset);
-                *s += static_cast<{cpp_type}>(dist);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[],
-        )
+        return self._get_c_ops()[0]
 
     def _make_input_deref_op(self) -> Op | None:
-        symbol = self._make_input_deref_symbol()
-        cpp_type = cpp_type_from_descriptor(self._value_type)
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {symbol}(void* state, void* result) {{
-                *static_cast<{cpp_type}*>(result) = *static_cast<{cpp_type}*>(state);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[],
-        )
+        return self._get_c_ops()[1]
 
     def _make_output_deref_op(self) -> Op | None:
         return None

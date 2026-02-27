@@ -6,13 +6,11 @@
 
 from __future__ import annotations
 
-from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir
+from .._bindings import Op, make_discard_iterator_ops
 from .._utils.protocols import get_dtype
 from .._utils.temp_storage_buffer import TempStorageBuffer
 from ..types import TypeDescriptor, from_numpy_dtype
 from ._base import IteratorBase
-from ._common import CUDA_PREAMBLE
 
 
 class DiscardIterator(IteratorBase):
@@ -51,53 +49,22 @@ class DiscardIterator(IteratorBase):
             value_type=value_type,
         )
 
+    def _get_c_ops(self):
+        if not hasattr(self, "_c_ops"):
+            self._c_ops = make_discard_iterator_ops(
+                self._value_type.info, self._state_bytes
+            )
+        return self._c_ops
+
     def _make_advance_op(self) -> Op:
-        symbol = self._make_advance_symbol()
-
-        source = f"""{CUDA_PREAMBLE}
-
-extern "C" __device__ void {symbol}(void*, void*) {{
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source)
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[],
-        )
+        return self._get_c_ops()[0]
 
     def _make_input_deref_op(self) -> Op | None:
-        symbol = self._make_input_deref_symbol()
-
-        source = f"""{CUDA_PREAMBLE}
-
-extern "C" __device__ void {symbol}(void*, void*) {{
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source)
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[],
-        )
+        return self._get_c_ops()[1]
 
     def _make_output_deref_op(self) -> Op | None:
-        symbol = self._make_output_deref_symbol()
-
-        source = f"""{CUDA_PREAMBLE}
-
-extern "C" __device__ void {symbol}(void*, void*) {{
-}}
-"""
-        ltoir = compile_cpp_to_ltoir(source)
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[],
-        )
+        # Re-use the same no-op deref for both input and output
+        return self._get_c_ops()[1]
 
     def __add__(self, offset: int) -> "DiscardIterator":
         return DiscardIterator(self._reference_iterator)

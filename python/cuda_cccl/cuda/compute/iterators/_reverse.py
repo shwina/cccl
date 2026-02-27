@@ -6,13 +6,22 @@
 
 from __future__ import annotations
 
-from textwrap import dedent
-
-from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir
+from .._bindings import Iterator, IteratorKind, Op, make_reverse_iterator_ops
 from .._utils.protocols import get_size, is_device_array
 from ._base import IteratorBase
-from ._common import CUDA_PREAMBLE, ensure_iterator
+from ._common import ensure_iterator
+
+
+def _make_iter_struct(it: IteratorBase, advance_op: Op, deref_op: Op) -> Iterator:
+    """Build a Cython Iterator struct from individual Op objects."""
+    return Iterator(
+        it.state_alignment,
+        IteratorKind.ITERATOR,
+        advance_op,
+        deref_op,
+        it.value_type.info,
+        state=it.state,
+    )
 
 
 class ReverseIterator(IteratorBase):
@@ -50,82 +59,39 @@ class ReverseIterator(IteratorBase):
 
     def _make_advance_op(self) -> Op:
         """Provide Op for advance that negates offset direction."""
-        child_op = self._underlying.get_advance_op()
-        symbol = self._make_advance_symbol()
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {child_op.name}(void* state, void* offset);
-
-            extern "C" __device__ void {symbol}(void* state, void* offset) {{
-                int64_t neg_offset = -static_cast<int64_t>(*static_cast<uint64_t*>(offset));
-                {child_op.name}(state, &neg_offset);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[child_op.ltoir, *child_op.extra_ltoirs],
+        advance_op = self._underlying.get_advance_op()
+        # Use input deref if available; fall back to output deref for advance generation
+        deref_op = (
+            self._underlying.get_input_deref_op()
+            or self._underlying.get_output_deref_op()
         )
+        if deref_op is None:
+            raise ValueError(
+                "Underlying iterator must support at least one dereference operation"
+            )
+        underlying_iter = _make_iter_struct(self._underlying, advance_op, deref_op)
+        advance, _ = make_reverse_iterator_ops(underlying_iter)
+        return advance
 
     def _make_input_deref_op(self) -> Op | None:
         """Provide Op for input dereference that delegates to underlying."""
-        child_op = self._underlying.get_input_deref_op()
-        if child_op is None:
+        advance_op = self._underlying.get_advance_op()
+        deref_op = self._underlying.get_input_deref_op()
+        if deref_op is None:
             return None
-
-        symbol = self._make_input_deref_symbol()
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {child_op.name}(void* state, void* result);
-
-            extern "C" __device__ void {symbol}(void* state, void* result) {{
-                {child_op.name}(state, result);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[child_op.ltoir, *child_op.extra_ltoirs],
-        )
+        underlying_iter = _make_iter_struct(self._underlying, advance_op, deref_op)
+        _, deref = make_reverse_iterator_ops(underlying_iter)
+        return deref
 
     def _make_output_deref_op(self) -> Op | None:
         """Provide Op for output dereference that delegates to underlying."""
-        child_op = self._underlying.get_output_deref_op()
-        if child_op is None:
+        advance_op = self._underlying.get_advance_op()
+        deref_op = self._underlying.get_output_deref_op()
+        if deref_op is None:
             return None
-
-        symbol = self._make_output_deref_symbol()
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {child_op.name}(void* state, void* value);
-
-            extern "C" __device__ void {symbol}(void* state, void* value) {{
-                {child_op.name}(state, value);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[child_op.ltoir, *child_op.extra_ltoirs],
-        )
+        underlying_iter = _make_iter_struct(self._underlying, advance_op, deref_op)
+        _, deref = make_reverse_iterator_ops(underlying_iter)
+        return deref
 
     @property
     def children(self):

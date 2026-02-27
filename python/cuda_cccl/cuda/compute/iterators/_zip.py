@@ -6,13 +6,22 @@
 
 from __future__ import annotations
 
-from textwrap import dedent
-
-from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir
+from .._bindings import Iterator, IteratorKind, Op, make_zip_iterator_ops
 from ..types import struct
 from ._base import IteratorBase, compose_iterator_states
-from ._common import CUDA_PREAMBLE, ensure_iterator
+from ._common import ensure_iterator
+
+
+def _make_child_iter(it: IteratorBase, advance_op: Op, deref_op: Op) -> Iterator:
+    """Build a Cython Iterator struct from individual Op objects."""
+    return Iterator(
+        it.state_alignment,
+        IteratorKind.ITERATOR,
+        advance_op,
+        deref_op,
+        it.value_type.info,
+        state=it.state,
+    )
 
 
 class ZipIterator(IteratorBase):
@@ -38,9 +47,6 @@ class ZipIterator(IteratorBase):
         "_field_names",
         "_value_offsets",
         "_state_offsets",
-        "_advance_result",
-        "_input_deref_result",
-        "_output_deref_result",
     ]
 
     def __init__(self, *args):
@@ -87,125 +93,57 @@ class ZipIterator(IteratorBase):
             value_type=self._value_type,
         )
 
+    def _call_c_zip(self, child_iters: list) -> tuple:
+        """Call make_zip_iterator_ops with the given child Iterators."""
+        state_size = len(self._state_bytes)
+        return make_zip_iterator_ops(
+            child_iters,
+            self._state_offsets,
+            self._value_offsets,
+            self._state_bytes,
+            state_size,
+            self._state_alignment,
+            self._value_type.info,
+        )
+
     def _make_advance_op(self) -> Op:
         """Provide Op for advance that calls all child iterator advances."""
-        child_ops = [it.get_advance_op() for it in self._iterators]
-        symbol = self._make_advance_symbol()
-
-        externs = "\n".join(
-            f'extern "C" __device__ void {op.name}(void* state, void* offset);'
-            for op in child_ops
-        )
-
-        calls = "\n        ".join(
-            f"{op.name}(static_cast<char*>(state) + {offset}, offset);"
-            for op, offset in zip(child_ops, self._state_offsets)
-        )
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            {externs}
-
-            extern "C" __device__ void {symbol}(void* state, void* offset) {{
-                {calls}
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[
-                ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
-            ],
-        )
+        child_iters = []
+        for it in self._iterators:
+            advance_op = it.get_advance_op()
+            # Use input deref if available; fall back to output for advance generation
+            deref_op = it.get_input_deref_op() or it.get_output_deref_op()
+            if deref_op is None:
+                raise ValueError(
+                    "Each child iterator must support at least one dereference operation"
+                )
+            child_iters.append(_make_child_iter(it, advance_op, deref_op))
+        advance, _ = self._call_c_zip(child_iters)
+        return advance
 
     def _make_input_deref_op(self) -> Op | None:
         """Provide Op for input deref that calls all child iterator input derefs."""
-        child_ops = [it.get_input_deref_op() for it in self._iterators]
-        if not all(op is not None for op in child_ops):
-            return None
-
-        symbol = self._make_input_deref_symbol()
-
-        externs = "\n".join(
-            f'extern "C" __device__ void {op.name}(void* state, void* result);'
-            for op in child_ops
-        )
-
-        calls = "\n        ".join(
-            f"{op.name}(static_cast<char*>(state) + {state_off}, "
-            f"static_cast<char*>(result) + {val_off});"
-            for op, state_off, val_off in zip(
-                child_ops, self._state_offsets, self._value_offsets
-            )
-        )
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            {externs}
-
-            extern "C" __device__ void {symbol}(void* state, void* result) {{
-                {calls}
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[
-                ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
-            ],
-        )
+        child_iters = []
+        for it in self._iterators:
+            advance_op = it.get_advance_op()
+            deref_op = it.get_input_deref_op()
+            if deref_op is None:
+                return None
+            child_iters.append(_make_child_iter(it, advance_op, deref_op))
+        _, deref = self._call_c_zip(child_iters)
+        return deref
 
     def _make_output_deref_op(self) -> Op | None:
         """Provide Op for output deref that calls all child iterator output derefs."""
-        child_ops = [it.get_output_deref_op() for it in self._iterators]
-        if not all(op is not None for op in child_ops):
-            return None
-
-        symbol = self._make_output_deref_symbol()
-
-        externs = "\n".join(
-            f'extern "C" __device__ void {op.name}(void* state, void* value);'
-            for op in child_ops
-        )
-
-        calls = "\n        ".join(
-            f"{op.name}(static_cast<char*>(state) + {state_off}, "
-            f"static_cast<char*>(value) + {val_off});"
-            for op, state_off, val_off in zip(
-                child_ops, self._state_offsets, self._value_offsets
-            )
-        )
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            {externs}
-
-            extern "C" __device__ void {symbol}(void* state, void* value) {{
-                {calls}
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[
-                ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
-            ],
-        )
+        child_iters = []
+        for it in self._iterators:
+            advance_op = it.get_advance_op()
+            deref_op = it.get_output_deref_op()
+            if deref_op is None:
+                return None
+            child_iters.append(_make_child_iter(it, advance_op, deref_op))
+        _, deref = self._call_c_zip(child_iters)
+        return deref
 
     @property
     def children(self):

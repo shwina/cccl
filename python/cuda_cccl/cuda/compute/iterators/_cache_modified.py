@@ -7,21 +7,21 @@
 from __future__ import annotations
 
 import struct
-from textwrap import dedent
 from typing import Literal
 
-from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir, cpp_type_from_descriptor
+from .._bindings import Op, make_cache_modified_input_iterator_ops
 from .._utils.protocols import get_data_pointer, get_dtype
 from ..types import from_numpy_dtype
 from ._base import IteratorBase
-from ._common import CUDA_PREAMBLE
 
-# Map modifier names to PTX cache operators and C++ intrinsics
-_CACHE_MODIFIERS = {
-    "stream": ("cs", "__ldcs"),  # Cache streaming (evict first)
-    "global": ("cg", "__ldcg"),  # Cache at L2 only
-    "volatile": ("cv", "__ldcv"),  # Don't cache, always fetch
+# Map modifier names to cccl_cache_modifier_t enum integer values
+# CCCL_LOAD_CG = 2 (Cache at L2 only)
+# CCCL_LOAD_CS = 3 (Cache streaming, evict first)
+# CCCL_LOAD_CV = 4 (Don't cache, always fetch)
+_MODIFIER_TO_ENUM = {
+    "stream": 3,    # CCCL_LOAD_CS
+    "global": 2,    # CCCL_LOAD_CG
+    "volatile": 4,  # CCCL_LOAD_CV
 }
 
 
@@ -41,6 +41,7 @@ class CacheModifiedInputIterator(IteratorBase):
         "_modifier",
         "_array",
         "_ptr",
+        "_c_ops",
     ]
 
     def __init__(
@@ -55,9 +56,9 @@ class CacheModifiedInputIterator(IteratorBase):
             array: Device array to wrap (must support __cuda_array_interface__)
             modifier: Cache modifier - "stream", "global", or "volatile"
         """
-        if modifier not in _CACHE_MODIFIERS:
+        if modifier not in _MODIFIER_TO_ENUM:
             raise ValueError(
-                f"Unknown modifier: {modifier}. Must be one of {list(_CACHE_MODIFIERS.keys())}"
+                f"Unknown modifier: {modifier}. Must be one of {list(_MODIFIER_TO_ENUM.keys())}"
             )
 
         self._modifier = modifier
@@ -80,58 +81,28 @@ class CacheModifiedInputIterator(IteratorBase):
         # State is just the pointer (8 bytes on 64-bit)
         state_bytes = struct.pack("Q", ptr)
 
+        self._c_ops = None  # Cached C ops (advance, deref)
+
         super().__init__(
             state_bytes=state_bytes,
             state_alignment=8,  # Pointer alignment
             value_type=value_type,
         )
 
+    def _get_c_ops(self):
+        if self._c_ops is None:
+            self._c_ops = make_cache_modified_input_iterator_ops(
+                self._value_type.info,
+                self._state_bytes,
+                _MODIFIER_TO_ENUM[self._modifier],
+            )
+        return self._c_ops
+
     def _make_advance_op(self) -> Op:
-        symbol = self._make_advance_symbol()
-        cpp_type = cpp_type_from_descriptor(self._value_type)
-
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {symbol}(void* state, void* offset) {{
-                auto* s = static_cast<{cpp_type}**>(state);
-                auto dist = *static_cast<uint64_t*>(offset);
-                *s += dist;
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[],
-        )
+        return self._get_c_ops()[0]
 
     def _make_input_deref_op(self) -> Op | None:
-        symbol = self._make_input_deref_symbol()
-        cpp_type = cpp_type_from_descriptor(self._value_type)
-        _, intrinsic = _CACHE_MODIFIERS[self._modifier]
-
-        # Use cache-modified intrinsic for all supported sizes (1, 2, 4, 8, 16 bytes)
-        # These correspond to PTX instructions: ld.global.{modifier}.b{8,16,32,64,128}
-        # Note: __ldcs, __ldcg, __ldcv intrinsics work for all these sizes
-        source = dedent(f"""
-            {CUDA_PREAMBLE}
-
-            extern "C" __device__ void {symbol}(void* state, void* result) {{
-                auto* ptr = *static_cast<{cpp_type}**>(state);
-                *static_cast<{cpp_type}*>(result) = {intrinsic}(ptr);
-            }}
-        """).strip()
-
-        ltoir = compile_cpp_to_ltoir(source)
-        return Op(
-            operator_type=OpKind.STATELESS,
-            name=symbol,
-            ltoir=ltoir,
-            extra_ltoirs=[],
-        )
+        return self._get_c_ops()[1]
 
     def _make_output_deref_op(self) -> Op | None:
         # Cache-modified iterator is input-only
