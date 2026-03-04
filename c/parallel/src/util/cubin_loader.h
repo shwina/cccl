@@ -11,8 +11,7 @@
 #pragma once
 
 // C-compatible declaration of the generic cubin loader.
-// The C++ implementation lives in reduce.cu (uses new char[] / delete[] to
-// match the allocator expected by the cleanup functions).
+// The implementation lives in cubin_loader.cu.
 // This header intentionally contains no C++ includes so that Cython-generated
 // C code can safely include it.
 

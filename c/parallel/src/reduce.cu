@@ -526,58 +526,6 @@ catch (const std::exception& exc)
   return CUDA_ERROR_UNKNOWN;
 }
 
-CUresult cccl_load_cubin_and_get_kernels(
-  const void* cubin_in,
-  size_t cubin_size,
-  void** cubin_copy_out,
-  CUlibrary* library_out,
-  const char** kernel_names,
-  CUkernel* kernel_handles,
-  int num_kernels)
-{
-  *cubin_copy_out = nullptr;
-  *library_out    = nullptr;
-
-  if (cubin_in == nullptr || cubin_size == 0)
-  {
-    return CUDA_ERROR_INVALID_VALUE;
-  }
-
-  char* cubin_copy = new (std::nothrow) char[cubin_size];
-  if (!cubin_copy)
-  {
-    return CUDA_ERROR_OUT_OF_MEMORY;
-  }
-  std::memcpy(cubin_copy, cubin_in, cubin_size);
-
-  CUresult status = cuLibraryLoadData(library_out, cubin_copy, nullptr, nullptr, 0, nullptr, nullptr, 0);
-  if (status != CUDA_SUCCESS)
-  {
-    delete[] cubin_copy;
-    return status;
-  }
-
-  for (int i = 0; i < num_kernels; ++i)
-  {
-    if (kernel_names[i] == nullptr)
-    {
-      kernel_handles[i] = nullptr;
-      continue;
-    }
-    status = cuLibraryGetKernel(&kernel_handles[i], *library_out, kernel_names[i]);
-    if (status != CUDA_SUCCESS)
-    {
-      cuLibraryUnload(*library_out);
-      *library_out = nullptr;
-      delete[] cubin_copy;
-      return status;
-    }
-  }
-
-  *cubin_copy_out = cubin_copy;
-  return CUDA_SUCCESS;
-}
-
 // Backward compatibility wrapper
 CUresult cccl_device_reduce_build(
   cccl_device_reduce_build_result_t* build,
