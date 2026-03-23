@@ -1,0 +1,7 @@
+// Minimal functional stub for CUDA JIT compilation
+#ifndef _CLANGJIT_FUNCTIONAL
+#define _CLANGJIT_FUNCTIONAL
+
+// Empty stub - extended lambdas not needed for basic JIT compilation
+
+#endif // _CLANGJIT_FUNCTIONAL

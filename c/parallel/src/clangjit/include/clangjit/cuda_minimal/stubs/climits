@@ -1,0 +1,7 @@
+// Minimal climits stub for CUDA JIT compilation
+#ifndef _CLANGJIT_CLIMITS
+#define _CLANGJIT_CLIMITS
+
+#include "limits.h"
+
+#endif // _CLANGJIT_CLIMITS

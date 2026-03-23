@@ -1,0 +1,7 @@
+// Minimal <cfloat> stub for CCCL freestanding mode
+#ifndef _CLANGJIT_CFLOAT
+#define _CLANGJIT_CFLOAT
+
+#include "float.h"
+
+#endif // _CLANGJIT_CFLOAT

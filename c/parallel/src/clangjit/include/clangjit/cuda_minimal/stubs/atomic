@@ -1,0 +1,60 @@
+// Minimal <atomic> stub for CCCL freestanding mode
+#ifndef _CLANGJIT_ATOMIC_STUB
+#define _CLANGJIT_ATOMIC_STUB
+
+namespace std {
+
+enum memory_order {
+    memory_order_relaxed,
+    memory_order_consume,
+    memory_order_acquire,
+    memory_order_release,
+    memory_order_acq_rel,
+    memory_order_seq_cst
+};
+
+// Minimal atomic template - only supports basic operations needed by CUB
+template <typename T>
+class atomic {
+    T value_;
+public:
+    atomic() noexcept = default;
+    constexpr atomic(T desired) noexcept : value_(desired) {}
+    atomic(const atomic&) = delete;
+    atomic& operator=(const atomic&) = delete;
+
+    T load(memory_order = memory_order_seq_cst) const noexcept {
+        return value_;
+    }
+
+    void store(T desired, memory_order = memory_order_seq_cst) noexcept {
+        value_ = desired;
+    }
+
+    bool compare_exchange_weak(T& expected, T desired,
+                               memory_order success = memory_order_seq_cst,
+                               memory_order failure = memory_order_seq_cst) noexcept {
+        if (value_ == expected) {
+            value_ = desired;
+            return true;
+        }
+        expected = value_;
+        return false;
+    }
+
+    bool compare_exchange_strong(T& expected, T desired,
+                                 memory_order success = memory_order_seq_cst,
+                                 memory_order failure = memory_order_seq_cst) noexcept {
+        return compare_exchange_weak(expected, desired, success, failure);
+    }
+
+    T exchange(T desired, memory_order = memory_order_seq_cst) noexcept {
+        T old = value_;
+        value_ = desired;
+        return old;
+    }
+};
+
+} // namespace std
+
+#endif // _CLANGJIT_ATOMIC_STUB

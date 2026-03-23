@@ -1,0 +1,18 @@
+// Minimal cstddef stub for CUDA JIT compilation
+// Compatible with libcu++ which expects to pull types from global namespace
+#ifndef _CLANGJIT_CSTDDEF
+#define _CLANGJIT_CSTDDEF
+
+#include "stddef.h"
+
+// max_align_t in global namespace (required by libcudacxx)
+using max_align_t = long double;
+
+namespace std {
+    using ::size_t;
+    using ::ptrdiff_t;
+    using nullptr_t = decltype(nullptr);
+    using ::max_align_t;
+}
+
+#endif // _CLANGJIT_CSTDDEF

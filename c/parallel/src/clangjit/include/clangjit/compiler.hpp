@@ -1,0 +1,47 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace clangjit {
+
+struct CompilationResult {
+    bool success;
+    std::string object_file_path;  // Path to generated .o file
+    std::string diagnostics;       // Compiler messages
+};
+
+struct LinkResult {
+    bool success;
+    std::string library_path;  // Path to .so file
+    std::string diagnostics;
+};
+
+// Forward declaration to avoid including heavy Clang headers
+struct CompilerConfig;
+
+class CUDACompiler {
+public:
+    CUDACompiler();
+    ~CUDACompiler();
+
+    // Compile CUDA source code to object file
+    CompilationResult compileToObject(
+        const std::string& source_code,
+        const std::string& output_path,
+        const CompilerConfig& config
+    );
+
+    // Link object files to shared library
+    LinkResult linkToSharedLibrary(
+        const std::vector<std::string>& object_files,
+        const std::string& output_path,
+        const CompilerConfig& config
+    );
+
+private:
+    class Impl;
+    Impl* impl_;
+};
+
+} // namespace clangjit

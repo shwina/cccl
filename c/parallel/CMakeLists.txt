@@ -26,6 +26,8 @@ file(
   "src/*.cu"
   "src/*.cpp"
 )
+# Exclude clangjit sources — they are built as a separate library
+list(FILTER srcs EXCLUDE REGEX "^src/clangjit/")
 
 add_library(cccl.c.parallel SHARED ${srcs})
 set_property(TARGET cccl.c.parallel PROPERTY POSITION_INDEPENDENT_CODE ON)
@@ -95,3 +97,5 @@ endif()
 if (CCCL_C_Parallel_ENABLE_HEADER_TESTING)
   include(cmake/CParallelHeaderTesting.cmake)
 endif()
+
+add_subdirectory(src/clangjit)

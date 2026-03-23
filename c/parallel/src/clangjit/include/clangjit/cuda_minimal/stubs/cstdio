@@ -1,0 +1,14 @@
+// Minimal cstdio stub for CUDA JIT compilation
+#ifndef _CLANGJIT_CSTDIO
+#define _CLANGJIT_CSTDIO
+
+// Forward declare what CUDA headers typically need
+extern "C" {
+int printf(const char*, ...);
+}
+
+namespace std {
+    using ::printf;
+}
+
+#endif // _CLANGJIT_CSTDIO

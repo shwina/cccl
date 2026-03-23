@@ -1,0 +1,30 @@
+#pragma once
+
+#include <string>
+#include <vector>
+#include <unordered_map>
+
+namespace clangjit {
+
+struct CompilerConfig {
+    std::string cuda_toolkit_path;
+    std::string clangjit_include_path;  // Path to clangjit include directory (for minimal CUDA runtime)
+    std::vector<std::string> include_paths;
+    std::vector<std::string> library_paths;
+    std::vector<std::string> device_bitcode_files;  // Paths to .bc files to link into device code
+    std::unordered_map<std::string, std::string> macro_definitions;  // key=macro name, value=macro value (empty for flag macros)
+    int sm_version = 70;
+    int optimization_level = 2;
+    bool debug = false;
+    bool verbose = false;
+    bool trace_includes = false;  // Show all included headers during compilation (for debugging header search)
+    bool keep_artifacts = false;  // Keep compiled artifacts for inspection (PTX, object files, etc.)
+};
+
+// Auto-detect CUDA toolkit and create default configuration
+CompilerConfig detectDefaultConfig();
+
+// Validate that the configuration is usable
+bool validateConfig(const CompilerConfig& config, std::string* error_message = nullptr);
+
+} // namespace clangjit

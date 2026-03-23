@@ -1,0 +1,7 @@
+// Minimal cmath stub for CUDA JIT compilation
+#ifndef _CLANGJIT_CMATH
+#define _CLANGJIT_CMATH
+
+#include "math.h"
+
+#endif // _CLANGJIT_CMATH

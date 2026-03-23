@@ -1,0 +1,72 @@
+// Minimal stdexcept stub for CUDA JIT compilation
+#ifndef _CLANGJIT_STDEXCEPT
+#define _CLANGJIT_STDEXCEPT
+
+namespace std {
+
+// Base exception class
+class exception {
+public:
+    exception() noexcept = default;
+    exception(const exception&) noexcept = default;
+    exception& operator=(const exception&) noexcept = default;
+    virtual ~exception() noexcept = default;
+    virtual const char* what() const noexcept { return "exception"; }
+};
+
+// Logic errors
+class logic_error : public exception {
+protected:
+    const char* _msg;
+public:
+    explicit logic_error(const char* msg) : _msg(msg) {}
+    virtual const char* what() const noexcept override { return _msg; }
+};
+
+class invalid_argument : public logic_error {
+public:
+    explicit invalid_argument(const char* msg) : logic_error(msg) {}
+};
+
+class domain_error : public logic_error {
+public:
+    explicit domain_error(const char* msg) : logic_error(msg) {}
+};
+
+class length_error : public logic_error {
+public:
+    explicit length_error(const char* msg) : logic_error(msg) {}
+};
+
+class out_of_range : public logic_error {
+public:
+    explicit out_of_range(const char* msg) : logic_error(msg) {}
+};
+
+// Runtime errors
+class runtime_error : public exception {
+protected:
+    const char* _msg;
+public:
+    explicit runtime_error(const char* msg) : _msg(msg) {}
+    virtual const char* what() const noexcept override { return _msg; }
+};
+
+class range_error : public runtime_error {
+public:
+    explicit range_error(const char* msg) : runtime_error(msg) {}
+};
+
+class overflow_error : public runtime_error {
+public:
+    explicit overflow_error(const char* msg) : runtime_error(msg) {}
+};
+
+class underflow_error : public runtime_error {
+public:
+    explicit underflow_error(const char* msg) : runtime_error(msg) {}
+};
+
+} // namespace std
+
+#endif // _CLANGJIT_STDEXCEPT

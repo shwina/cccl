@@ -1,0 +1,14 @@
+// Minimal cstring stub for CUDA JIT compilation
+#ifndef _CLANGJIT_CSTRING
+#define _CLANGJIT_CSTRING
+
+#include "string.h"
+
+namespace std {
+    using ::memcpy;
+    using ::memset;
+    using ::memmove;
+    using ::memcmp;
+}
+
+#endif // _CLANGJIT_CSTRING
