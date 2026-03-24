@@ -373,6 +373,40 @@ __DEVICE__ double __shfl_xor_sync(unsigned mask, double val, int lane_mask, int 
 // - Atomic operations (atomicAdd, atomicCAS, etc.)
 // - Bit manipulation (__clz, __ffs, __popc, __brev)
 
+// Cache-modified load intrinsics (__ldcs, __ldcg, __ldca, __ldcv, __ldlu)
+// These map to PTX ld.global.{cs,cg,ca,cv,lu} instructions.
+#define __CLANGJIT_CACHE_LOAD(fn, ptx_op)                                         \
+  __DEVICE__ char fn(const char *p) {                                             \
+    unsigned int r; asm(ptx_op ".s8 %0,[%1];" : "=r"(r) : "l"(p)); return (char)r; } \
+  __DEVICE__ signed char fn(const signed char *p) {                               \
+    unsigned int r; asm(ptx_op ".s8 %0,[%1];" : "=r"(r) : "l"(p)); return (signed char)r; } \
+  __DEVICE__ short fn(const short *p) {                                           \
+    unsigned short r; asm(ptx_op ".s16 %0,[%1];" : "=h"(r) : "l"(p)); return (short)r; } \
+  __DEVICE__ int fn(const int *p) {                                               \
+    unsigned int r; asm(ptx_op ".s32 %0,[%1];" : "=r"(r) : "l"(p)); return (int)r; } \
+  __DEVICE__ long long fn(const long long *p) {                                   \
+    unsigned long long r; asm(ptx_op ".s64 %0,[%1];" : "=l"(r) : "l"(p)); return (long long)r; } \
+  __DEVICE__ unsigned char fn(const unsigned char *p) {                           \
+    unsigned int r; asm(ptx_op ".u8 %0,[%1];" : "=r"(r) : "l"(p)); return (unsigned char)r; } \
+  __DEVICE__ unsigned short fn(const unsigned short *p) {                         \
+    unsigned short r; asm(ptx_op ".u16 %0,[%1];" : "=h"(r) : "l"(p)); return r; } \
+  __DEVICE__ unsigned int fn(const unsigned int *p) {                             \
+    unsigned int r; asm(ptx_op ".u32 %0,[%1];" : "=r"(r) : "l"(p)); return r; }  \
+  __DEVICE__ unsigned long long fn(const unsigned long long *p) {                 \
+    unsigned long long r; asm(ptx_op ".u64 %0,[%1];" : "=l"(r) : "l"(p)); return r; } \
+  __DEVICE__ float fn(const float *p) {                                           \
+    float r; asm(ptx_op ".f32 %0,[%1];" : "=f"(r) : "l"(p)); return r; }        \
+  __DEVICE__ double fn(const double *p) {                                         \
+    double r; asm(ptx_op ".f64 %0,[%1];" : "=d"(r) : "l"(p)); return r; }
+
+__CLANGJIT_CACHE_LOAD(__ldcs, "ld.global.cs")
+__CLANGJIT_CACHE_LOAD(__ldcg, "ld.global.cg")
+__CLANGJIT_CACHE_LOAD(__ldca, "ld.global.ca")
+__CLANGJIT_CACHE_LOAD(__ldcv, "ld.global.cv")
+__CLANGJIT_CACHE_LOAD(__ldlu, "ld.global.lu")
+
+#undef __CLANGJIT_CACHE_LOAD
+
 #undef __DEVICE__
 
 #endif // _CLANGJIT_DEVICE_INTRINSICS_H

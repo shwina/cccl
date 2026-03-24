@@ -409,6 +409,38 @@ __device__ inline void cudaGridDependencySynchronize() {
     asm volatile("griddepcontrol.wait;");
 }
 
+// Cache-modified load intrinsics (__ldcs, __ldcg, __ldca, __ldcv, __ldlu)
+#define __CLANGJIT_CACHE_LOAD(fn, ptx_op)                                                     \
+  __device__ inline char fn(const char *p) {                                                   \
+    unsigned int r; asm(ptx_op ".s8 %0,[%1];" : "=r"(r) : "l"(p)); return (char)r; }          \
+  __device__ inline signed char fn(const signed char *p) {                                     \
+    unsigned int r; asm(ptx_op ".s8 %0,[%1];" : "=r"(r) : "l"(p)); return (signed char)r; }   \
+  __device__ inline short fn(const short *p) {                                                 \
+    unsigned short r; asm(ptx_op ".s16 %0,[%1];" : "=h"(r) : "l"(p)); return (short)r; }      \
+  __device__ inline int fn(const int *p) {                                                     \
+    unsigned int r; asm(ptx_op ".s32 %0,[%1];" : "=r"(r) : "l"(p)); return (int)r; }          \
+  __device__ inline long long fn(const long long *p) {                                         \
+    unsigned long long r; asm(ptx_op ".s64 %0,[%1];" : "=l"(r) : "l"(p)); return (long long)r;}\
+  __device__ inline unsigned char fn(const unsigned char *p) {                                 \
+    unsigned int r; asm(ptx_op ".u8 %0,[%1];" : "=r"(r) : "l"(p)); return (unsigned char)r; } \
+  __device__ inline unsigned short fn(const unsigned short *p) {                               \
+    unsigned short r; asm(ptx_op ".u16 %0,[%1];" : "=h"(r) : "l"(p)); return r; }             \
+  __device__ inline unsigned int fn(const unsigned int *p) {                                   \
+    unsigned int r; asm(ptx_op ".u32 %0,[%1];" : "=r"(r) : "l"(p)); return r; }               \
+  __device__ inline unsigned long long fn(const unsigned long long *p) {                       \
+    unsigned long long r; asm(ptx_op ".u64 %0,[%1];" : "=l"(r) : "l"(p)); return r; }         \
+  __device__ inline float fn(const float *p) {                                                 \
+    float r; asm(ptx_op ".f32 %0,[%1];" : "=f"(r) : "l"(p)); return r; }                      \
+  __device__ inline double fn(const double *p) {                                               \
+    double r; asm(ptx_op ".f64 %0,[%1];" : "=d"(r) : "l"(p)); return r; }
+
+__CLANGJIT_CACHE_LOAD(__ldcs, "ld.global.cs")
+__CLANGJIT_CACHE_LOAD(__ldcg, "ld.global.cg")
+__CLANGJIT_CACHE_LOAD(__ldca, "ld.global.ca")
+__CLANGJIT_CACHE_LOAD(__ldcv, "ld.global.cv")
+__CLANGJIT_CACHE_LOAD(__ldlu, "ld.global.lu")
+#undef __CLANGJIT_CACHE_LOAD
+
 #else // !__CLANGJIT_DEVICE_COMPILATION__
 // Host stubs for warp intrinsics - satisfy the parser during host compilation
 // Must be __host__ __device__ because device code templates are still parsed
