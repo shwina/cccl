@@ -46,49 +46,6 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail::reduce
 {
-template <typename PolicySelector,
-          typename InputIteratorT,
-          typename OutputIteratorT,
-          typename OffsetT,
-          typename ReductionOpT,
-          typename InitT,
-          typename AccumT,
-          typename TransformOpT>
-struct DeviceReduceKernelSource
-{
-  // PolicySelector must be stateless, so we can pass the type to the kernel
-  static_assert(::cuda::std::is_empty_v<PolicySelector>);
-
-  CUB_DEFINE_KERNEL_GETTER(
-    SingleTileKernel,
-    DeviceReduceSingleTileKernel<PolicySelector,
-                                 InputIteratorT,
-                                 OutputIteratorT,
-                                 OffsetT,
-                                 ReductionOpT,
-                                 InitT,
-                                 AccumT,
-                                 TransformOpT>)
-
-  CUB_DEFINE_KERNEL_GETTER(
-    ReductionKernel, DeviceReduceKernel<PolicySelector, InputIteratorT, OffsetT, ReductionOpT, AccumT, TransformOpT>)
-
-  CUB_DEFINE_KERNEL_GETTER(
-    SingleTileSecondKernel,
-    DeviceReduceSingleTileKernel<PolicySelector,
-                                 AccumT*,
-                                 OutputIteratorT,
-                                 int, // Always used with int offsets
-                                 ReductionOpT,
-                                 InitT,
-                                 AccumT>)
-
-  CUB_RUNTIME_FUNCTION static constexpr size_t AccumSize()
-  {
-    return sizeof(AccumT);
-  }
-};
-
 // TODO(bgruber): remove in CCCL 4.0
 template <typename PolicyHub>
 struct policy_selector_from_hub
@@ -172,18 +129,11 @@ template <typename InputIteratorT,
           typename AccumT = ::cuda::std::__accumulator_t<ReductionOpT, cub::detail::it_value_t<InputIteratorT>, InitT>,
           typename TransformOpT = ::cuda::std::identity,
           typename PolicyHub    = detail::reduce::policy_hub<AccumT, OffsetT, ReductionOpT>,
-          typename KernelSource = detail::reduce::DeviceReduceKernelSource<
-            detail::reduce::policy_selector_from_hub<PolicyHub>,
-            InputIteratorT,
-            OutputIteratorT,
-            OffsetT,
-            ReductionOpT,
-            InitT,
-            AccumT,
-            TransformOpT>,
           typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 struct DispatchReduce
 {
+  using PolicySelectorT = detail::reduce::policy_selector_from_hub<PolicyHub>;
+
   //---------------------------------------------------------------------------
   // Problem state
   //---------------------------------------------------------------------------
@@ -218,9 +168,44 @@ struct DispatchReduce
 
   TransformOpT transform_op;
 
-  KernelSource kernel_source;
-
   KernelLauncherFactory launcher_factory;
+
+  //---------------------------------------------------------------------------
+  // Kernel references
+  //---------------------------------------------------------------------------
+
+  CUB_RUNTIME_FUNCTION static constexpr auto SingleTileKernel()
+  {
+    return &detail::reduce::DeviceReduceSingleTileKernel<PolicySelectorT,
+                                                         InputIteratorT,
+                                                         OutputIteratorT,
+                                                         OffsetT,
+                                                         ReductionOpT,
+                                                         InitT,
+                                                         AccumT,
+                                                         TransformOpT>;
+  }
+
+  CUB_RUNTIME_FUNCTION static constexpr auto ReductionKernel()
+  {
+    return &detail::reduce::DeviceReduceKernel<PolicySelectorT,
+                                               InputIteratorT,
+                                               OffsetT,
+                                               ReductionOpT,
+                                               AccumT,
+                                               TransformOpT>;
+  }
+
+  CUB_RUNTIME_FUNCTION static constexpr auto SingleTileSecondKernel()
+  {
+    return &detail::reduce::DeviceReduceSingleTileKernel<PolicySelectorT,
+                                                         AccumT*,
+                                                         OutputIteratorT,
+                                                         int,
+                                                         ReductionOpT,
+                                                         InitT,
+                                                         AccumT>;
+  }
 
   //---------------------------------------------------------------------------
   // Constructor
@@ -238,7 +223,6 @@ struct DispatchReduce
     cudaStream_t stream,
     int ptx_version,
     TransformOpT transform_op              = {},
-    KernelSource kernel_source             = {},
     KernelLauncherFactory launcher_factory = {})
       : d_temp_storage(d_temp_storage)
       , temp_storage_bytes(temp_storage_bytes)
@@ -250,7 +234,6 @@ struct DispatchReduce
       , stream(stream)
       , ptx_version(ptx_version)
       , transform_op(transform_op)
-      , kernel_source(kernel_source)
       , launcher_factory(launcher_factory)
   {}
 
@@ -355,8 +338,7 @@ struct DispatchReduce
     // Temporary storage allocation requirements
     void* allocations[1]       = {};
     size_t allocation_sizes[1] = {
-      max_blocks * kernel_source.AccumSize() // bytes needed for privatized block
-                                             // reductions
+      max_blocks * sizeof(AccumT) // bytes needed for privatized block reductions
     };
 
     // Alias the temporary allocations from the single storage blob (or
@@ -444,12 +426,12 @@ struct DispatchReduce
           wrapped_policy.SingleTile().BlockThreads() * wrapped_policy.SingleTile().ItemsPerThread()))
     {
       // Small, single tile size
-      return InvokeSingleTile(kernel_source.SingleTileKernel(), wrapped_policy);
+      return InvokeSingleTile(SingleTileKernel(), wrapped_policy);
     }
     else
     {
       // Regular size
-      return InvokePasses(kernel_source.ReductionKernel(), kernel_source.SingleTileSecondKernel(), wrapped_policy);
+      return InvokePasses(ReductionKernel(), SingleTileSecondKernel(), wrapped_policy);
     }
   }
 
@@ -498,7 +480,6 @@ struct DispatchReduce
     InitT init,
     cudaStream_t stream,
     TransformOpT transform_op              = {},
-    KernelSource kernel_source             = {},
     KernelLauncherFactory launcher_factory = {},
     MaxPolicyT max_policy                  = {})
   {
@@ -521,7 +502,6 @@ struct DispatchReduce
       stream,
       ptx_version,
       transform_op,
-      kernel_source,
       launcher_factory);
 
     // Ignore Wmaybe-uninitialized to work around a GCC 13 issue:
@@ -571,15 +551,6 @@ template <
                                  ::cuda::std::invoke_result_t<TransformOpT, ::cuda::std::iter_value_t<InputIteratorT>>,
                                  InitT>,
   typename PolicyHub    = detail::reduce::policy_hub<AccumT, OffsetT, ReductionOpT>,
-  typename KernelSource = detail::reduce::DeviceReduceKernelSource<
-    typename PolicyHub::MaxPolicy,
-    InputIteratorT,
-    OutputIteratorT,
-    OffsetT,
-    ReductionOpT,
-    InitT,
-    AccumT,
-    TransformOpT>,
   typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 using DispatchTransformReduce =
   DispatchReduce<InputIteratorT,
@@ -590,19 +561,18 @@ using DispatchTransformReduce =
                  AccumT,
                  TransformOpT,
                  PolicyHub,
-                 KernelSource,
                  KernelLauncherFactory>;
 
 namespace detail::reduce
 {
 template <typename AccumT,
+          typename PolicySelector,
           typename InputIteratorT,
           typename OutputIteratorT,
           typename OffsetT,
           typename ReductionOpT,
           typename InitT,
           typename TransformOpT,
-          typename KernelSource,
           typename KernelLauncherFactory>
 CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_passes(
   void* d_temp_storage,
@@ -615,9 +585,13 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_passes(
   cudaStream_t stream,
   TransformOpT transform_op,
   reduce_policy active_policy,
-  KernelSource kernel_source,
   KernelLauncherFactory launcher_factory)
 {
+  constexpr auto reduction_kernel =
+    &DeviceReduceKernel<PolicySelector, InputIteratorT, OffsetT, ReductionOpT, AccumT, TransformOpT>;
+  constexpr auto single_tile_second_kernel =
+    &DeviceReduceSingleTileKernel<PolicySelector, AccumT*, OutputIteratorT, int, ReductionOpT, InitT, AccumT>;
+
   // Get SM count
   int sm_count;
   if (const auto error = CubDebug(launcher_factory.MultiProcessorCount(sm_count)))
@@ -629,7 +603,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_passes(
   const auto tile_size = active_policy.reduce.block_threads * active_policy.reduce.items_per_thread;
   int sm_occupancy;
   if (const auto error = CubDebug(launcher_factory.MaxSmOccupancy(
-        sm_occupancy, kernel_source.ReductionKernel(), active_policy.reduce.block_threads)))
+        sm_occupancy, reduction_kernel, active_policy.reduce.block_threads)))
   {
     return error;
   }
@@ -644,7 +618,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_passes(
   // Temporary storage allocation requirements
   void* allocations[1]       = {};
   size_t allocation_sizes[1] = {
-    max_blocks * kernel_source.AccumSize() // bytes needed for privatized block reductions
+    max_blocks * sizeof(AccumT) // bytes needed for privatized block reductions
   };
 
   // Alias the temporary allocations from the single storage blob (or
@@ -680,7 +654,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_passes(
 
   // Invoke DeviceReduceKernel
   launcher_factory(reduce_grid_size, active_policy.reduce.block_threads, 0, stream)
-    .doit(kernel_source.ReductionKernel(), d_in, d_block_reductions, num_items, even_share, reduction_op, transform_op);
+    .doit(reduction_kernel, d_in, d_block_reductions, num_items, even_share, reduction_op, transform_op);
 
   // Check for failure to launch
   if (const auto error = CubDebug(cudaPeekAtLastError()))
@@ -705,7 +679,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE cudaError_t invoke_passes(
 
   // Invoke DeviceReduceSingleTileKernel
   launcher_factory(1, active_policy.single_tile.block_threads, 0, stream)
-    .doit(kernel_source.SingleTileSecondKernel(),
+    .doit(single_tile_second_kernel,
           d_block_reductions,
           d_out,
           reduce_grid_size,
@@ -754,8 +728,6 @@ template <
   typename AccumT =
     decltype(select_accum_t<InputIteratorT, InitT, ReductionOpT, TransformOpT>(static_cast<OverrideAccumT*>(nullptr))),
   typename PolicySelector = policy_selector_from_types<AccumT, OffsetT, ReductionOpT>,
-  typename KernelSource =
-    DeviceReduceKernelSource<PolicySelector, InputIteratorT, OutputIteratorT, OffsetT, ReductionOpT, InitT, AccumT, TransformOpT>,
   typename KernelLauncherFactory = CUB_DETAIL_DEFAULT_KERNEL_LAUNCHER_FACTORY>
 #if _CCCL_HAS_CONCEPTS()
   requires reduce_policy_selector<PolicySelector>
@@ -771,9 +743,18 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto dispatch(
   cudaStream_t stream,
   TransformOpT transform_op              = {},
   PolicySelector policy_selector         = {},
-  KernelSource kernel_source             = {},
   KernelLauncherFactory launcher_factory = {})
 {
+  constexpr auto single_tile_kernel =
+    &DeviceReduceSingleTileKernel<PolicySelector,
+                                  InputIteratorT,
+                                  OutputIteratorT,
+                                  OffsetT,
+                                  ReductionOpT,
+                                  InitT,
+                                  AccumT,
+                                  TransformOpT>;
+
   // from Dispatch()
   ::cuda::arch_id arch_id{};
   if (const auto error = CubDebug(launcher_factory.PtxArchId(arch_id)))
@@ -810,7 +791,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto dispatch(
 
     // Invoke single_reduce_sweep_kernel
     launcher_factory(1, active_policy.single_tile.block_threads, 0, stream)
-      .doit(kernel_source.SingleTileKernel(), d_in, d_out, num_items, reduction_op, init, transform_op);
+      .doit(single_tile_kernel, d_in, d_out, num_items, reduction_op, init, transform_op);
 
     // Check for failure to launch
     if (const auto error = CubDebug(cudaPeekAtLastError()))
@@ -828,7 +809,7 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto dispatch(
   }
 
   // Regular size
-  return invoke_passes<AccumT>(
+  return invoke_passes<AccumT, PolicySelector>(
     d_temp_storage,
     temp_storage_bytes,
     d_in,
@@ -839,7 +820,6 @@ CUB_RUNTIME_FUNCTION _CCCL_FORCEINLINE auto dispatch(
     stream,
     transform_op,
     active_policy,
-    kernel_source,
     launcher_factory);
 }
 } // namespace detail::reduce
