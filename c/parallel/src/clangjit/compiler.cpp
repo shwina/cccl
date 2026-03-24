@@ -258,6 +258,20 @@ public:
           }
         }
 
+        // Re-link libdevice to resolve any new references (e.g. __nv_pow)
+        // introduced by the extra bitcode modules.
+        if (success && !bitcode_files_to_link.empty()) {
+          std::string libdevice_path = config.cuda_toolkit_path +
+                                       "/nvvm/libdevice/libdevice.10.bc";
+          llvm::SMDiagnostic err;
+          auto libdevice = llvm::parseIRFile(libdevice_path, err, llvm_context);
+          if (libdevice) {
+            // Use AppendToUsed to avoid internalization issues
+            llvm::Linker::linkModules(*mod, std::move(libdevice),
+                                      llvm::Linker::LinkOnlyNeeded);
+          }
+        }
+
         if (success) {
           std::string err_str;
           const llvm::Target *target = llvm::TargetRegistry::lookupTarget(
