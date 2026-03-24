@@ -366,6 +366,13 @@ public:
     arg_strings.push_back(config.clangjit_include_path +
                           "/clangjit/cuda_minimal/stubs");
     arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(
+        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
+    arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(config.cuda_toolkit_path + "/include");
     arg_strings.push_back("-include");
     arg_strings.push_back(
@@ -373,6 +380,10 @@ public:
         "/clangjit/cuda_minimal/__clang_cuda_runtime_wrapper.h");
     arg_strings.push_back("-D__CLANGJIT_DEVICE_COMPILATION__=1");
     arg_strings.push_back("-DNDEBUG");
+    arg_strings.push_back("-D_CUB_DISABLE_CMATH");
+    arg_strings.push_back("-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK");
+    arg_strings.push_back("-DCCCL_DISABLE_FP16_SUPPORT=1");
+    arg_strings.push_back("-DCCCL_DISABLE_BF16_SUPPORT=1");
     arg_strings.push_back("-fdeprecated-macro");
     arg_strings.push_back("-fcxx-exceptions");
     arg_strings.push_back("-fexceptions");
