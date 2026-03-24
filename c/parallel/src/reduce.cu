@@ -476,6 +476,7 @@ void collect_bitcode_files(
     }
   };
 
+  int extra_counter = 0;
   auto add_op_code = [&](cccl_op_t& the_op, const std::string& name) {
     if (!the_op.code || the_op.code_size == 0)
     {
@@ -483,7 +484,6 @@ void collect_bitcode_files(
     }
     if (the_op.code_type == CCCL_OP_CPP_SOURCE)
     {
-      // Compile C++ source to LLVM bitcode on the fly
       auto path = make_temp_path("cccl_" + name + "_", unique_id, ".bc");
       if (compile_cpp_source_to_bitcode(the_op.code, the_op.code_size, path, config))
       {
@@ -493,8 +493,35 @@ void collect_bitcode_files(
     }
     else
     {
-      // LLVM_IR or LTOIR — already bitcode
       add_bitcode(the_op.code, the_op.code_size, name);
+    }
+    // Also link any extra modules (child iterator ops, numba-compiled ops).
+    // Extras may be C++ source or LLVM bitcode — detect by checking for
+    // LLVM bitcode magic bytes (0x42 0x43 = "BC").
+    for (size_t i = 0; i < the_op.num_extra_ltoirs; ++i)
+    {
+      if (the_op.extra_ltoirs[i] && the_op.extra_ltoir_sizes[i] > 0)
+      {
+        auto extra_name     = name + "_extra" + std::to_string(extra_counter++);
+        const auto* data    = the_op.extra_ltoirs[i];
+        const auto data_sz  = the_op.extra_ltoir_sizes[i];
+        const bool is_bitcode_data =
+          data_sz >= 2 && static_cast<unsigned char>(data[0]) == 0x42 && static_cast<unsigned char>(data[1]) == 0x43;
+        if (!is_bitcode_data)
+        {
+          // Treat as C++ source
+          auto path = make_temp_path("cccl_" + extra_name + "_", unique_id, ".bc");
+          if (compile_cpp_source_to_bitcode(data, data_sz, path, config))
+          {
+            config.device_bitcode_files.push_back(path);
+            bitcode_paths.push_back(path);
+          }
+        }
+        else
+        {
+          add_bitcode(data, data_sz, extra_name);
+        }
+      }
     }
   };
 
