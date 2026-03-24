@@ -56,6 +56,9 @@ public:
     // Only valid after successful compile() and if keep_artifacts is set
     std::string getArtifactsPath() const { return temp_dir_; }
 
+    // Get the cubin extracted during compilation
+    const std::vector<char>& getCubin() const { return cubin_; }
+
     // Unload the current library and clean up temporary files
     void cleanup();
 
@@ -68,6 +71,7 @@ private:
     DynamicLibrary library_;
     std::string temp_dir_;
     std::string last_error_;
+    std::vector<char> cubin_;
 };
 
 } // namespace clangjit

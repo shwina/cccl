@@ -91,6 +91,7 @@ cdef extern from "cccl/c/types.h":
     cdef enum cccl_op_code_type:
         CCCL_OP_LTOIR
         CCCL_OP_CPP_SOURCE
+        CCCL_OP_LLVM_IR
 
     cdef struct cccl_op_t:
         cccl_op_kind_t type
@@ -209,7 +210,7 @@ cdef class Op:
     cdef cccl_op_t op_data
 
 
-    cdef void _set_members(self, cccl_op_kind_t op_type, str name, bytes lto_ir, bytes state, int state_alignment, list extra_ltoirs):
+    cdef void _set_members(self, cccl_op_kind_t op_type, str name, bytes lto_ir, bytes state, int state_alignment, list extra_ltoirs, cccl_op_code_type code_type = cccl_op_code_type.CCCL_OP_LTOIR):
         memset(&self.op_data, 0, sizeof(cccl_op_t))
         # Reference Python objects in the class to ensure lifetime
         self.op_encoded_name = name.encode("utf-8")
@@ -221,7 +222,7 @@ cdef class Op:
         self.op_data.name = <const char *>self.op_encoded_name
         self.op_data.code = <const char *>lto_ir
         self.op_data.code_size = len(lto_ir)
-        self.op_data.code_type = cccl_op_code_type.CCCL_OP_LTOIR
+        self.op_data.code_type = code_type
         self.op_data.size = len(state)
         self.op_data.alignment = state_alignment
         self.op_data.state = <void *><const char *>state
@@ -246,7 +247,7 @@ cdef class Op:
             self.op_data.num_extra_ltoirs = 0
 
 
-    def __cinit__(self, /, *, name = None, operator_type = None, ltoir = None, state = None, state_alignment = 1, extra_ltoirs = None):
+    def __cinit__(self, /, *, name = None, operator_type = None, ltoir = None, state = None, state_alignment = 1, extra_ltoirs = None, code_type = "ltoir"):
         if name is None and ltoir is None:
             name = ""
             ltoir = b""
@@ -269,13 +270,21 @@ cdef class Op:
                 f"The operator_type argument should be an enumerator of operator kinds"
             )
         _validate_alignment(state_alignment)
+        cdef cccl_op_code_type c_code_type
+        if code_type == "llvm_ir":
+            c_code_type = cccl_op_code_type.CCCL_OP_LLVM_IR
+        elif code_type == "cpp_source":
+            c_code_type = cccl_op_code_type.CCCL_OP_CPP_SOURCE
+        else:
+            c_code_type = cccl_op_code_type.CCCL_OP_LTOIR
         self._set_members(
             <cccl_op_kind_t> operator_type.value,
             <str> name,
             <bytes> ltoir,
             <bytes> state,
             <int> state_alignment,
-            <list> extra_ltoirs
+            <list> extra_ltoirs,
+            c_code_type,
         )
 
     def __dealloc__(self):

@@ -46,6 +46,9 @@ bool JITCompiler::compile(const std::string& source_code) {
         return false;
     }
 
+    // Store the cubin for later inspection
+    cubin_ = std::move(compile_result.cubin);
+
     if (config_.verbose) {
         std::cout << "Compilation diagnostics:\n" << compile_result.diagnostics << "\n";
     }

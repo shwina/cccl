@@ -77,6 +77,22 @@ def compile_cpp_to_ltoir(
     return result.code
 
 
+def compile_cpp_as_source(source: str) -> bytes:
+    """
+    Return C++ source code as bytes for deferred compilation.
+
+    Instead of compiling to LTO-IR via NVRTC, this returns the source
+    as-is for compilation by clangjit on the C side.
+
+    Args:
+        source: C++ source code string
+
+    Returns:
+        Source code as bytes
+    """
+    return source.encode("utf-8")
+
+
 def cpp_type_from_descriptor(type_desc) -> str | None:
     """
     Get the C++ type name from a TypeDescriptor.

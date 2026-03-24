@@ -9,7 +9,7 @@ from __future__ import annotations
 from textwrap import dedent
 
 from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir, make_variable_declaration
+from .._cpp_compile import compile_cpp_as_source, make_variable_declaration
 from ..op import make_op_adapter
 from ..types import TypeDescriptor, signature_from_annotations
 from ._base import IteratorBase
@@ -130,12 +130,12 @@ class TransformIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[child_op.ltoir, *child_op.extra_ltoirs],
         )
 
@@ -165,12 +165,12 @@ class TransformIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[
                 compiled_op.ltoir,
                 *compiled_op.extra_ltoirs,
@@ -205,12 +205,12 @@ class TransformIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[
                 compiled_op.ltoir,
                 *compiled_op.extra_ltoirs,

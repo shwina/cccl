@@ -452,6 +452,40 @@ def _infer_return_type(py_func, input_types):
 
 
 # -----------------------------------------------------------------------------
+# LLVM IR compilation
+# -----------------------------------------------------------------------------
+
+
+def _compile_to_llvm_bitcode(func, sig) -> bytes:
+    """Compile a Numba device function to LLVM bitcode.
+
+    Uses numba's internal compilation pipeline to get LLVM IR text,
+    then converts to bitcode via llvmlite.
+
+    Args:
+        func: The Numba-compilable function
+        sig: The Numba signature
+
+    Returns:
+        bytes: LLVM bitcode
+    """
+    from llvmlite import binding as llvm
+    from numba.cuda.compiler import _compile_pyfunc_with_fixup
+
+    lib, _ = _compile_pyfunc_with_fixup(func, sig, debug=False, lto=False)
+    llvm_modules = lib.llvm_strs
+
+    # Parse and link all modules
+    mod = llvm.parse_assembly(llvm_modules[0])
+    for extra in llvm_modules[1:]:
+        other = llvm.parse_assembly(extra)
+        mod.link_in(other)
+
+    mod.verify()
+    return mod.as_bitcode()
+
+
+# -----------------------------------------------------------------------------
 # Stateless ops
 # -----------------------------------------------------------------------------
 
@@ -486,14 +520,15 @@ def _compile_op_impl(cachable_op, input_types_tuple: tuple, output_type):
 
     sig = numba_output_type(*numba_input_types)
     wrapped_op, wrapper_sig = create_op_void_ptr_wrapper(op, sig)
-    ltoir, _ = numba.cuda.compile(wrapped_op, sig=wrapper_sig, output="ltoir")
+    llvm_ir = _compile_to_llvm_bitcode(wrapped_op, wrapper_sig)
 
     return Op(
         operator_type=OpKind.STATELESS,
         name=wrapped_op.__name__,
-        ltoir=ltoir,
+        ltoir=llvm_ir,
         state_alignment=1,
         state=None,
+        code_type="llvm_ir",
     )
 
 
@@ -815,8 +850,8 @@ def _compile_stateful_op(op, input_types, state_arrays, output_type=None):
         op, sig, state_array_types, state_info
     )
 
-    # Compile the wrapper to LTOIR
-    ltoir, _ = numba.cuda.compile(wrapped_op, sig=wrapper_sig, output="ltoir")
+    # Compile the wrapper to LLVM bitcode
+    llvm_ir = _compile_to_llvm_bitcode(wrapped_op, wrapper_sig)
 
     # Pack all data pointers as bytes (sequentially)
     state_bytes = struct.pack(f"{len(state_ptrs)}P", *state_ptrs)
@@ -825,9 +860,10 @@ def _compile_stateful_op(op, input_types, state_arrays, output_type=None):
     return Op(
         operator_type=OpKind.STATEFUL,
         name=wrapped_op.__name__,
-        ltoir=ltoir,
+        ltoir=llvm_ir,
         state_alignment=state_alignment,
         state=state_bytes,
+        code_type="llvm_ir",
     )
 
 

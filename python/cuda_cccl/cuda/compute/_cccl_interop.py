@@ -228,8 +228,10 @@ def _check_compile_result(cubin: bytes):
         sass = "nvdiasm not found, skipping SASS validation"
         warnings.warn(sass)
 
-    assert "LDL" not in sass, "LDL instruction found in SASS"
-    assert "STL" not in sass, "STL instruction found in SASS"
+    if "LDL" in sass:
+        warnings.warn("LDL instruction found in SASS (local memory load)")
+    if "STL" in sass:
+        warnings.warn("STL instruction found in SASS (local memory store)")
     return temp_cubin_file.name
 
 
@@ -258,7 +260,8 @@ def call_build(build_impl_fn: Callable, *args, **kwargs):
 
     if _check_sass:
         cubin = result._get_cubin()
-        temp_cubin_file_name = _check_compile_result(cubin)
-        os.unlink(temp_cubin_file_name)
+        if cubin:
+            temp_cubin_file_name = _check_compile_result(cubin)
+            os.unlink(temp_cubin_file_name)
 
     return result

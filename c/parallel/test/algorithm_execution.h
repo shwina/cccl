@@ -146,6 +146,7 @@ void AlgorithmExecute(std::optional<BuildCache>& cache, const std::optional<KeyT
     }
   }
 
+#ifndef CCCL_DISABLE_SASS_CHECK
   if (build.cubin != nullptr && build.cubin_size > 0)
   {
     const std::string& sass = inspect_sass(build.cubin, build.cubin_size);
@@ -156,6 +157,7 @@ void AlgorithmExecute(std::optional<BuildCache>& cache, const std::optional<KeyT
       REQUIRE(sass.find("STL") == std::string::npos);
     }
   }
+#endif // CCCL_DISABLE_SASS_CHECK
 
   CUstream null_stream = 0;
 

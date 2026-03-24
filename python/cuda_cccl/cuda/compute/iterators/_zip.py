@@ -9,7 +9,7 @@ from __future__ import annotations
 from textwrap import dedent
 
 from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir
+from .._cpp_compile import compile_cpp_as_source
 from ..types import struct
 from ._base import IteratorBase, compose_iterator_states
 from ._common import CUDA_PREAMBLE, ensure_iterator
@@ -112,12 +112,12 @@ class ZipIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[
                 ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
             ],
@@ -154,12 +154,12 @@ class ZipIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[
                 ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
             ],
@@ -196,12 +196,12 @@ class ZipIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[
                 ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
             ],

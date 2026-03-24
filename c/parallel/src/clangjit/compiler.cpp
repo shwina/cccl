@@ -686,6 +686,9 @@ public:
       nvJitLinkGetLinkedCubin(jitlink_handle, cubin_data.data());
       nvJitLinkDestroy(&jitlink_handle);
 
+      // Store cubin in the result for inspection
+      result.cubin = cubin_data;
+
       std::string arch = std::to_string(config.sm_version);
       const char *fatbin_options[] = {"-64", "-cuda"};
       nvFatbinHandle fatbin_handle = nullptr;

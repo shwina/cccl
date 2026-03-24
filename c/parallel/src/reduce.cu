@@ -10,10 +10,12 @@
 
 #include <cccl/c/reduce.h>
 
+#include <clangjit/compiler.hpp>
 #include <clangjit/config.hpp>
 #include <clangjit/jit_compiler.hpp>
 
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -433,6 +435,24 @@ std::string make_temp_path(const std::string& prefix, uintptr_t id, const std::s
   return (std::filesystem::temp_directory_path() / (prefix + std::to_string(id) + ext)).string();
 }
 
+// Compile C++ source to LLVM bitcode, write to temp file
+bool compile_cpp_source_to_bitcode(
+  const char* source,
+  size_t source_size,
+  const std::string& output_path,
+  const clangjit::CompilerConfig& jit_config)
+{
+  clangjit::CUDACompiler compiler;
+  std::string src(source, source_size);
+  auto result = compiler.compileToDeviceBitcode(src, jit_config);
+  if (!result.success)
+  {
+    fprintf(stderr, "\nERROR compiling iterator op to bitcode: %s\n", result.diagnostics.c_str());
+    return false;
+  }
+  return write_file(result.bitcode.data(), result.bitcode.size(), output_path);
+}
+
 // Collect all bitcode files to link (op + iterator advance/dereference functions)
 void collect_bitcode_files(
   cccl_op_t op,
@@ -454,7 +474,29 @@ void collect_bitcode_files(
     }
   };
 
-  // Op bitcode (only for LLVM_IR or LTOIR code types, not CPP_SOURCE)
+  auto add_op_code = [&](cccl_op_t& the_op, const std::string& name) {
+    if (!the_op.code || the_op.code_size == 0)
+    {
+      return;
+    }
+    if (the_op.code_type == CCCL_OP_CPP_SOURCE)
+    {
+      // Compile C++ source to LLVM bitcode on the fly
+      auto path = make_temp_path("cccl_" + name + "_", unique_id, ".bc");
+      if (compile_cpp_source_to_bitcode(the_op.code, the_op.code_size, path, config))
+      {
+        config.device_bitcode_files.push_back(path);
+        bitcode_paths.push_back(path);
+      }
+    }
+    else
+    {
+      // LLVM_IR or LTOIR — already bitcode
+      add_bitcode(the_op.code, the_op.code_size, name);
+    }
+  };
+
+  // Op bitcode (only for LLVM_IR or LTOIR code types, not CPP_SOURCE — CPP_SOURCE is embedded inline)
   bool is_bitcode = op.code_type == CCCL_OP_LLVM_IR || op.code_type == CCCL_OP_LTOIR;
   if (is_bitcode && op.code && op.code_size > 0)
   {
@@ -464,15 +506,15 @@ void collect_bitcode_files(
   // Input iterator advance/dereference
   if (input_it.type == CCCL_ITERATOR)
   {
-    add_bitcode(input_it.advance.code, input_it.advance.code_size, "in_adv");
-    add_bitcode(input_it.dereference.code, input_it.dereference.code_size, "in_deref");
+    add_op_code(input_it.advance, "in_adv");
+    add_op_code(input_it.dereference, "in_deref");
   }
 
   // Output iterator advance/dereference
   if (output_it.type == CCCL_ITERATOR)
   {
-    add_bitcode(output_it.advance.code, output_it.advance.code_size, "out_adv");
-    add_bitcode(output_it.dereference.code, output_it.dereference.code_size, "out_deref");
+    add_op_code(output_it.advance, "out_adv");
+    add_op_code(output_it.dereference, "out_deref");
   }
 }
 
@@ -572,8 +614,20 @@ try
   }
 
   build->cc               = cc_major * 10 + cc_minor;
-  build->cubin            = nullptr;
-  build->cubin_size       = 0;
+  // Store cubin for SASS inspection
+  const auto& cubin = compiler->getCubin();
+  if (!cubin.empty())
+  {
+    auto* cubin_copy = new char[cubin.size()];
+    std::memcpy(cubin_copy, cubin.data(), cubin.size());
+    build->cubin      = cubin_copy;
+    build->cubin_size = cubin.size();
+  }
+  else
+  {
+    build->cubin      = nullptr;
+    build->cubin_size = 0;
+  }
   build->jit_compiler     = compiler;
   build->reduce_fn        = reinterpret_cast<void*>(reduce_fn);
   build->accumulator_size = init.type.size;
@@ -645,7 +699,13 @@ try
     delete static_cast<clangjit::JITCompiler*>(build_ptr->jit_compiler);
     build_ptr->jit_compiler = nullptr;
   }
-  build_ptr->reduce_fn = nullptr;
+  if (build_ptr->cubin)
+  {
+    delete[] static_cast<char*>(build_ptr->cubin);
+    build_ptr->cubin = nullptr;
+  }
+  build_ptr->cubin_size = 0;
+  build_ptr->reduce_fn  = nullptr;
 
   return CUDA_SUCCESS;
 }

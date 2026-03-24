@@ -12,7 +12,7 @@ from textwrap import dedent
 import numpy as np
 
 from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir
+from .._cpp_compile import compile_cpp_as_source
 from ..types import from_numpy_dtype
 from ._base import IteratorBase
 from ._common import CUDA_PREAMBLE
@@ -88,8 +88,9 @@ class ShuffleIterator(IteratorBase):
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=compile_cpp_to_ltoir(source),
+            ltoir=compile_cpp_as_source(source),
             extra_ltoirs=[],
+            code_type="cpp_source",
         )
 
     def _make_input_deref_op(self) -> Op | None:
@@ -131,8 +132,9 @@ class ShuffleIterator(IteratorBase):
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=compile_cpp_to_ltoir(source),
+            ltoir=compile_cpp_as_source(source),
             extra_ltoirs=[],
+            code_type="cpp_source",
         )
 
     def _make_output_deref_op(self) -> Op | None:

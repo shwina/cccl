@@ -9,6 +9,7 @@ struct CompilationResult {
     bool success;
     std::string object_file_path;  // Path to generated .o file
     std::string diagnostics;       // Compiler messages
+    std::vector<char> cubin;       // Device cubin extracted during compilation
 };
 
 struct BitcodeResult {

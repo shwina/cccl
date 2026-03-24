@@ -88,6 +88,7 @@ class Op:
         state=None,
         state_alignment: int = 1,
         extra_ltoirs=None,
+        code_type: str = "ltoir",
     ): ...
     @property
     def state(self) -> bytes: ...

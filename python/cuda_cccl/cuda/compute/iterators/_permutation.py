@@ -9,7 +9,7 @@ from __future__ import annotations
 from textwrap import dedent
 
 from .._bindings import Op, OpKind
-from .._cpp_compile import compile_cpp_to_ltoir, make_variable_declaration
+from .._cpp_compile import compile_cpp_as_source, make_variable_declaration
 from ._base import IteratorBase, compose_iterator_states
 from ._common import CUDA_PREAMBLE, ensure_iterator
 
@@ -82,12 +82,12 @@ class PermutationIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[child_op.ltoir, *child_op.extra_ltoirs],
         )
 
@@ -131,12 +131,12 @@ class PermutationIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[
                 values_advance_op.ltoir,
                 *values_advance_op.extra_ltoirs,
@@ -187,12 +187,12 @@ class PermutationIterator(IteratorBase):
             }}
         """).strip()
 
-        ltoir = compile_cpp_to_ltoir(source)
+        code = compile_cpp_as_source(source)
 
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=ltoir,
+            ltoir=code, code_type="cpp_source",
             extra_ltoirs=[
                 values_advance_op.ltoir,
                 *values_advance_op.extra_ltoirs,
