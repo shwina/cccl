@@ -377,6 +377,7 @@ public:
     arg_strings.push_back("-fcxx-exceptions");
     arg_strings.push_back("-fexceptions");
     arg_strings.push_back("-O" + std::to_string(config.optimization_level));
+    arg_strings.push_back("-Wno-c++11-narrowing");
     arg_strings.push_back("-std=c++17");
     arg_strings.push_back("-x");
     arg_strings.push_back("cuda");

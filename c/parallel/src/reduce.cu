@@ -19,6 +19,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -96,86 +97,314 @@ std::string get_well_known_op_body(cccl_op_kind_t kind, const std::string& type_
   }
 }
 
-// Generate the CUDA source for the reduction
-std::string generate_reduce_source(
-  cccl_iterator_t input_it, cccl_iterator_t /*output_it*/, cccl_op_t op, cccl_value_t init, bool has_extern_op)
+std::string get_storage_type_def(size_t size, size_t alignment)
 {
-  const size_t value_size      = init.type.size;
-  const size_t value_alignment = init.type.alignment;
-  const auto type_name         = get_cpp_type_name(init.type.type);
-  const bool use_typed         = !type_name.empty() && input_it.type == CCCL_POINTER;
+  return std::format(
+    "struct __align__({}) storage_t {{\n"
+    "  char data[{}];\n"
+    "}};\n",
+    alignment,
+    size);
+}
 
-  // Use the operation's name, falling back to "user_op"
+// Generate op source: either inline well-known, embed C++ source, or declare extern for bitcode linkage
+std::string generate_op_source(
+  cccl_op_t op, const std::string& accum_type_name, bool has_bitcode_op, bool is_stateful)
+{
   const std::string op_name = (op.name && op.name[0]) ? op.name : "user_op";
-
   std::string src;
 
-  src += "#include <cuda_runtime.h>\n";
-  src += "#include <cub/device/device_reduce.cuh>\n\n";
-
-  if (has_extern_op)
+  if (op.code_type == CCCL_OP_CPP_SOURCE && op.code && op.code_size > 0)
   {
-    // Operation provided as linked bitcode - declare extern with matching name
-    src += std::format("extern \"C\" __device__ void {}(void* a_ptr, void* b_ptr, void* out_ptr);\n\n", op_name);
+    // Embed C++ source directly
+    src += std::string(op.code, op.code_size) + "\n\n";
+  }
+  else if (has_bitcode_op)
+  {
+    // Extern declaration for bitcode-linked operation
+    if (is_stateful)
+    {
+      src += std::format(
+        "extern \"C\" __device__ void {}(void* state, void* a_ptr, void* b_ptr, void* out_ptr);\n\n", op_name);
+    }
+    else
+    {
+      src += std::format("extern \"C\" __device__ void {}(void* a_ptr, void* b_ptr, void* out_ptr);\n\n", op_name);
+    }
   }
   else if (op.type >= CCCL_PLUS && op.type <= CCCL_MAXIMUM)
   {
     // Well-known operation - generate inline
     src += std::format("extern \"C\" __device__ void {}(void* a_ptr, void* b_ptr, void* out_ptr) {{\n", op_name);
-    src += get_well_known_op_body(op.type, type_name.empty() ? "char" : type_name);
+    src += get_well_known_op_body(op.type, accum_type_name);
     src += "}\n\n";
   }
 
-  if (use_typed)
+  return src;
+}
+
+// Generate the functor that wraps the op for CUB
+std::string generate_op_functor(cccl_op_t op, bool is_stateful)
+{
+  const std::string op_name = (op.name && op.name[0]) ? op.name : "user_op";
+  std::string src;
+
+  if (is_stateful)
   {
-    // Use the actual C++ type for better codegen
-    src += std::format("using value_t = {};\n\n", type_name);
+    src += std::format(
+      "struct ReduceOp {{\n"
+      "  void* state;\n"
+      "  __device__ __forceinline__\n"
+      "  accum_t operator()(const accum_t& a, const accum_t& b) const {{\n"
+      "    accum_t result;\n"
+      "    {}(state, (void*)&a, (void*)&b, (void*)&result);\n"
+      "    return result;\n"
+      "  }}\n"
+      "}};\n\n",
+      op_name);
   }
   else
   {
-    // Generic storage type for custom types
     src += std::format(
-      "struct __align__({}) value_t {{\n"
-      "  char data[{}];\n"
+      "struct ReduceOp {{\n"
+      "  __device__ __forceinline__\n"
+      "  accum_t operator()(const accum_t& a, const accum_t& b) const {{\n"
+      "    accum_t result;\n"
+      "    {}((void*)&a, (void*)&b, (void*)&result);\n"
+      "    return result;\n"
+      "  }}\n"
       "}};\n\n",
-      value_alignment,
-      value_size);
+      op_name);
   }
 
-  src += std::format(
-    "struct ReduceOp {{\n"
-    "  __device__ __forceinline__\n"
-    "  value_t operator()(const value_t& a, const value_t& b) const {{\n"
-    "    value_t result;\n"
-    "    {}((void*)&a, (void*)&b, (void*)&result);\n"
-    "    return result;\n"
-    "  }}\n"
-    "}};\n\n",
-    op_name);
+  return src;
+}
 
-  // Export the reduce function
+// Generate input iterator wrapper
+std::string generate_input_iterator(cccl_iterator_t it)
+{
+  std::string src;
+
+  if (it.type == CCCL_POINTER)
+  {
+    // For pointer iterators, the input type matches value_type
+    auto input_type = get_cpp_type_name(it.value_type.type);
+    if (input_type.empty())
+    {
+      // Custom type - use accum_t (which should match)
+      src += "using input_it_t = accum_t*;\n\n";
+    }
+    else
+    {
+      src += std::format("using input_it_t = {}*;\n\n", input_type);
+    }
+  }
+  else
+  {
+    // Custom iterator: state + advance + dereference as extern "C" functions
+    const std::string adv_name  = (it.advance.name && it.advance.name[0]) ? it.advance.name : "input_advance";
+    const std::string deref_name =
+      (it.dereference.name && it.dereference.name[0]) ? it.dereference.name : "input_dereference";
+
+    // Determine the input value type
+    auto input_val_type = get_cpp_type_name(it.value_type.type);
+    if (input_val_type.empty())
+    {
+      input_val_type = "accum_t";
+    }
+
+    // Define a separate input_value_t if different from accum_t
+    src += std::format(
+      "using input_value_t = {};\n",
+      input_val_type);
+
+    src += std::format(
+      "extern \"C\" __device__ void {}(void* state, const void* offset);\n"
+      "extern \"C\" __device__ void {}(const void* state, input_value_t* result);\n\n",
+      adv_name,
+      deref_name);
+
+    src += std::format(
+      "struct input_it_t {{\n"
+      "  using value_type = input_value_t;\n"
+      "  using difference_type = long long;\n"
+      "  using pointer = input_value_t*;\n"
+      "  using reference = input_value_t;\n"
+      "  using iterator_category = cuda::std::random_access_iterator_tag;\n"
+      "\n"
+      "  char state[{}];\n"
+      "\n"
+      "  __device__ input_it_t operator+(difference_type n) const {{\n"
+      "    input_it_t copy = *this;\n"
+      "    unsigned long long offset = static_cast<unsigned long long>(n);\n"
+      "    {}(copy.state, &offset);\n"
+      "    return copy;\n"
+      "  }}\n"
+      "  __device__ difference_type operator-(const input_it_t&) const {{ return 0; }}\n"
+      "  __device__ reference operator*() const {{\n"
+      "    input_value_t result;\n"
+      "    {}(state, &result);\n"
+      "    return result;\n"
+      "  }}\n"
+      "  __device__ reference operator[](difference_type n) const {{ return *(*this + n); }}\n"
+      "  __device__ bool operator==(const input_it_t&) const {{ return false; }}\n"
+      "  __device__ bool operator!=(const input_it_t&) const {{ return true; }}\n"
+      "}};\n\n",
+      it.size,
+      adv_name,
+      deref_name);
+  }
+
+  return src;
+}
+
+// Generate output iterator wrapper
+std::string generate_output_iterator(cccl_iterator_t it)
+{
+  if (it.type == CCCL_POINTER)
+  {
+    return "using output_it_t = accum_t*;\n\n";
+  }
+
+  const std::string adv_name  = (it.advance.name && it.advance.name[0]) ? it.advance.name : "output_advance";
+  const std::string deref_name =
+    (it.dereference.name && it.dereference.name[0]) ? it.dereference.name : "output_dereference";
+
+  std::string src;
+  src += std::format(
+    "extern \"C\" __device__ void {}(void* state, const void* offset);\n"
+    "extern \"C\" __device__ void {}(void* state, const void* value);\n\n",
+    adv_name,
+    deref_name);
+
+  src += std::format(
+    "struct output_proxy_t {{\n"
+    "  void* state;\n"
+    "  __device__ void operator=(const accum_t& val) {{\n"
+    "    {}(state, &val);\n"
+    "  }}\n"
+    "}};\n"
+    "struct output_it_t {{\n"
+    "  using value_type = accum_t;\n"
+    "  using difference_type = long long;\n"
+    "  using pointer = accum_t*;\n"
+    "  using reference = output_proxy_t;\n"
+    "  using iterator_category = cuda::std::random_access_iterator_tag;\n"
+    "\n"
+    "  char state[{}];\n"
+    "\n"
+    "  __device__ output_it_t operator+(difference_type n) const {{\n"
+    "    output_it_t copy = *this;\n"
+    "    unsigned long long offset = static_cast<unsigned long long>(n);\n"
+    "    {}(copy.state, &offset);\n"
+    "    return copy;\n"
+    "  }}\n"
+    "  __device__ difference_type operator-(const output_it_t&) const {{ return 0; }}\n"
+    "  __device__ reference operator*() {{ return output_proxy_t{{state}}; }}\n"
+    "  __device__ reference operator[](difference_type n) {{ return *(*this + n); }}\n"
+    "}};\n\n",
+    deref_name,
+    it.size,
+    adv_name);
+
+  return src;
+}
+
+// Generate the full CUDA source
+std::string generate_reduce_source(
+  cccl_iterator_t input_it, cccl_iterator_t output_it, cccl_op_t op, cccl_value_t init, bool has_bitcode_op)
+{
+  const bool is_stateful = (op.type == CCCL_STATEFUL);
+
+  // Determine accum type
+  const auto accum_type_name = get_cpp_type_name(init.type.type);
+  const auto storage_def     = get_storage_type_def(init.type.size, init.type.alignment);
+
+  std::string src;
+  src += "#include <cuda_runtime.h>\n";
+  src += "#include <cuda/std/iterator>\n";
+  src += "#include <cub/device/device_reduce.cuh>\n\n";
+
+  // Accum type
+  if (!accum_type_name.empty())
+  {
+    src += std::format("using accum_t = {};\n\n", accum_type_name);
+  }
+  else
+  {
+    src += storage_def + "using accum_t = storage_t;\n\n";
+  }
+
+  // Op
+  src += generate_op_source(op, accum_type_name.empty() ? "storage_t" : accum_type_name, has_bitcode_op, is_stateful);
+  src += generate_op_functor(op, is_stateful);
+
+  // Iterators
+  src += generate_input_iterator(input_it);
+  src += generate_output_iterator(output_it);
+
+  // Export
   src += "#ifdef _WIN32\n"
          "#define EXPORT __declspec(dllexport)\n"
          "#else\n"
          "#define EXPORT __attribute__((visibility(\"default\")))\n"
          "#endif\n\n";
 
+  // The exported reduce function
+  // Takes: d_temp_storage, temp_storage_bytes, d_input_state, d_output_state,
+  //        num_items, init_ptr, op_state_ptr
   src += "extern \"C\" EXPORT int cccl_jit_reduce(\n"
          "    void* d_temp_storage,\n"
          "    size_t* temp_storage_bytes,\n"
-         "    void* d_input,\n"
-         "    void* d_output,\n"
+         "    void* d_input_state,\n"
+         "    void* d_output_state,\n"
          "    unsigned long long num_items,\n"
-         "    void* init_ptr)\n"
-         "{\n"
-         "    value_t* input = static_cast<value_t*>(d_input);\n"
-         "    value_t* output = static_cast<value_t*>(d_output);\n"
-         "    value_t init = *static_cast<value_t*>(init_ptr);\n"
-         "    ReduceOp op;\n"
-         "\n"
+         "    void* init_ptr,\n"
+         "    void* op_state_ptr)\n"
+         "{\n";
+
+  // Input iterator
+  if (input_it.type == CCCL_POINTER)
+  {
+    src += "    input_it_t input = static_cast<accum_t*>(d_input_state);\n";
+  }
+  else
+  {
+    src += std::format(
+      "    input_it_t input;\n"
+      "    __builtin_memcpy(input.state, d_input_state, {});\n",
+      input_it.size);
+  }
+
+  // Output iterator
+  if (output_it.type == CCCL_POINTER)
+  {
+    src += "    output_it_t output = static_cast<accum_t*>(d_output_state);\n";
+  }
+  else
+  {
+    src += std::format(
+      "    output_it_t output;\n"
+      "    __builtin_memcpy(output.state, d_output_state, {});\n",
+      output_it.size);
+  }
+
+  src += "    accum_t init;\n"
+         "    __builtin_memcpy(&init, init_ptr, sizeof(accum_t));\n";
+
+  if (is_stateful)
+  {
+    src += "    ReduceOp op{op_state_ptr};\n";
+  }
+  else
+  {
+    src += "    ReduceOp op;\n";
+  }
+
+  src += "\n"
          "    cudaError_t err = cub::DeviceReduce::Reduce(\n"
          "        d_temp_storage, *temp_storage_bytes,\n"
-         "        input, output, (int)num_items, op, init);\n"
+         "        input, output, (unsigned long long)num_items, op, init);\n"
          "\n"
          "    if (d_temp_storage != nullptr) {\n"
          "        cudaError_t sync_err = cudaDeviceSynchronize();\n"
@@ -188,7 +417,7 @@ std::string generate_reduce_source(
   return src;
 }
 
-bool write_bitcode_file(const char* data, size_t size, const std::string& path)
+bool write_file(const char* data, size_t size, const std::string& path)
 {
   std::ofstream f(path, std::ios::binary);
   if (!f)
@@ -199,7 +428,65 @@ bool write_bitcode_file(const char* data, size_t size, const std::string& path)
   return f.good();
 }
 
+std::string make_temp_path(const std::string& prefix, uintptr_t id, const std::string& ext)
+{
+  return (std::filesystem::temp_directory_path() / (prefix + std::to_string(id) + ext)).string();
+}
+
+// Collect all bitcode files to link (op + iterator advance/dereference functions)
+void collect_bitcode_files(
+  cccl_op_t op,
+  cccl_iterator_t input_it,
+  cccl_iterator_t output_it,
+  uintptr_t unique_id,
+  std::vector<std::string>& bitcode_paths,
+  clangjit::CompilerConfig& config)
+{
+  auto add_bitcode = [&](const char* data, size_t size, const std::string& name) {
+    if (data && size > 0)
+    {
+      auto path = make_temp_path("cccl_" + name + "_", unique_id, ".bc");
+      if (write_file(data, size, path))
+      {
+        config.device_bitcode_files.push_back(path);
+        bitcode_paths.push_back(path);
+      }
+    }
+  };
+
+  // Op bitcode (only for LLVM_IR or LTOIR code types, not CPP_SOURCE)
+  bool is_bitcode = op.code_type == CCCL_OP_LLVM_IR || op.code_type == CCCL_OP_LTOIR;
+  if (is_bitcode && op.code && op.code_size > 0)
+  {
+    add_bitcode(op.code, op.code_size, "op");
+  }
+
+  // Input iterator advance/dereference
+  if (input_it.type == CCCL_ITERATOR)
+  {
+    add_bitcode(input_it.advance.code, input_it.advance.code_size, "in_adv");
+    add_bitcode(input_it.dereference.code, input_it.dereference.code_size, "in_deref");
+  }
+
+  // Output iterator advance/dereference
+  if (output_it.type == CCCL_ITERATOR)
+  {
+    add_bitcode(output_it.advance.code, output_it.advance.code_size, "out_adv");
+    add_bitcode(output_it.dereference.code, output_it.dereference.code_size, "out_deref");
+  }
+}
+
+void cleanup_temp_files(const std::vector<std::string>& paths)
+{
+  for (const auto& p : paths)
+  {
+    std::filesystem::remove(p);
+  }
+}
+
 } // anonymous namespace
+
+using reduce_fn_t = int (*)(void*, size_t*, void*, void*, unsigned long long, void*, void*);
 
 CUresult cccl_device_reduce_build_ex(
   cccl_device_reduce_build_result_t* build,
@@ -214,60 +501,69 @@ CUresult cccl_device_reduce_build_ex(
   const char* /*thrust_path*/,
   const char* /*libcudacxx_path*/,
   const char* /*ctk_path*/,
-  cccl_build_config* /*config*/)
+  cccl_build_config* build_config)
 try
 {
+  const uintptr_t unique_id = reinterpret_cast<uintptr_t>(build);
+
   // Determine if the operation is provided as linked bitcode
-  const bool has_extern_op = (op.type == CCCL_STATELESS || op.type == CCCL_STATEFUL) && op.code != nullptr
+  const bool is_bitcode_op = (op.code_type == CCCL_OP_LLVM_IR || op.code_type == CCCL_OP_LTOIR) && op.code != nullptr
                           && op.code_size > 0;
+  const bool has_bitcode_op = is_bitcode_op;
 
   // Generate the CUDA source
-  std::string cuda_source = generate_reduce_source(input_it, output_it, op, init, has_extern_op);
+  std::string cuda_source = generate_reduce_source(input_it, output_it, op, init, has_bitcode_op);
 
   // Set up clangjit compiler
-  clangjit::CompilerConfig config = clangjit::detectDefaultConfig();
-  config.sm_version               = cc_major * 10 + cc_minor;
-  config.verbose                  = false;
+  clangjit::CompilerConfig jit_config = clangjit::detectDefaultConfig();
+  jit_config.sm_version               = cc_major * 10 + cc_minor;
+  jit_config.verbose                  = false;
 
-  // If operation has bitcode, write it to a temp file and add to config
-  std::string bitcode_path;
-  if (has_extern_op)
+  // Apply extra build configuration
+  if (build_config)
   {
-    bitcode_path =
-      (std::filesystem::temp_directory_path() / ("cccl_reduce_op_" + std::to_string(reinterpret_cast<uintptr_t>(build))
-                                                 + ".bc"))
-        .string();
-    if (!write_bitcode_file(op.code, op.code_size, bitcode_path))
+    for (size_t i = 0; i < build_config->num_extra_include_dirs; ++i)
     {
-      fprintf(stderr, "\nERROR: Failed to write operation bitcode file\n");
-      return CUDA_ERROR_UNKNOWN;
+      jit_config.include_paths.push_back(build_config->extra_include_dirs[i]);
     }
-    config.device_bitcode_files.push_back(bitcode_path);
+    for (size_t i = 0; i < build_config->num_extra_compile_flags; ++i)
+    {
+      // Parse -D flags into macro_definitions
+      std::string flag = build_config->extra_compile_flags[i];
+      if (flag.substr(0, 2) == "-D")
+      {
+        auto eq = flag.find('=', 2);
+        if (eq != std::string::npos)
+        {
+          jit_config.macro_definitions[flag.substr(2, eq - 2)] = flag.substr(eq + 1);
+        }
+        else
+        {
+          jit_config.macro_definitions[flag.substr(2)] = "";
+        }
+      }
+    }
   }
 
+  // Collect bitcode files
+  std::vector<std::string> bitcode_paths;
+  collect_bitcode_files(op, input_it, output_it, unique_id, bitcode_paths, jit_config);
+
   // Compile
-  auto* compiler = new clangjit::JITCompiler(config);
+  auto* compiler = new clangjit::JITCompiler(jit_config);
 
   if (!compiler->compile(cuda_source))
   {
     fprintf(stderr, "\nERROR in cccl_device_reduce_build(): %s\n", compiler->getLastError().c_str());
     delete compiler;
-    if (!bitcode_path.empty())
-    {
-      std::filesystem::remove(bitcode_path);
-    }
+    cleanup_temp_files(bitcode_paths);
     return CUDA_ERROR_UNKNOWN;
   }
 
-  // Clean up temp bitcode file
-  if (!bitcode_path.empty())
-  {
-    std::filesystem::remove(bitcode_path);
-  }
+  cleanup_temp_files(bitcode_paths);
 
   // Get the reduce function pointer
-  using reduce_fn_t = int (*)(void*, size_t*, void*, void*, unsigned long long, void*);
-  auto reduce_fn    = compiler->getFunction<reduce_fn_t>("cccl_jit_reduce");
+  auto reduce_fn = compiler->getFunction<reduce_fn_t>("cccl_jit_reduce");
   if (!reduce_fn)
   {
     fprintf(stderr, "\nERROR: Failed to get reduce function: %s\n", compiler->getLastError().c_str());
@@ -298,21 +594,20 @@ CUresult cccl_device_reduce(
   cccl_iterator_t d_in,
   cccl_iterator_t d_out,
   uint64_t num_items,
-  cccl_op_t /*op*/,
+  cccl_op_t op,
   cccl_value_t init,
   CUstream /*stream*/)
 {
   try
   {
-    using reduce_fn_t = int (*)(void*, size_t*, void*, void*, unsigned long long, void*);
-    auto reduce_fn    = reinterpret_cast<reduce_fn_t>(build.reduce_fn);
+    auto reduce_fn = reinterpret_cast<reduce_fn_t>(build.reduce_fn);
 
     if (!reduce_fn)
     {
       return CUDA_ERROR_INVALID_VALUE;
     }
 
-    int status = reduce_fn(d_temp_storage, temp_storage_bytes, d_in.state, d_out.state, num_items, init.state);
+    int status = reduce_fn(d_temp_storage, temp_storage_bytes, d_in.state, d_out.state, num_items, init.state, op.state);
 
     return (status == 0) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
   }
@@ -334,7 +629,6 @@ CUresult cccl_device_reduce_nondeterministic(
   cccl_value_t init,
   CUstream stream)
 {
-  // For now, nondeterministic uses the same path as deterministic
   return cccl_device_reduce(build, d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, op, init, stream);
 }
 
@@ -361,7 +655,6 @@ catch (const std::exception& exc)
   return CUDA_ERROR_UNKNOWN;
 }
 
-// Backward compatibility wrapper
 CUresult cccl_device_reduce_build(
   cccl_device_reduce_build_result_t* build,
   cccl_iterator_t d_in,
