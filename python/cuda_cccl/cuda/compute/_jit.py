@@ -460,7 +460,9 @@ def _compile_to_llvm_bitcode(func, sig) -> bytes:
     """Compile a Numba device function to LLVM bitcode.
 
     Uses numba's internal compilation pipeline to get LLVM IR text,
-    then converts to bitcode via llvmlite.
+    then creates a void-returning wrapper (since numba functions return
+    a status code, but the C side expects void return), and converts
+    to bitcode via llvmlite.
 
     Args:
         func: The Numba-compilable function
@@ -469,6 +471,8 @@ def _compile_to_llvm_bitcode(func, sig) -> bytes:
     Returns:
         bytes: LLVM bitcode
     """
+    import re
+
     from llvmlite import binding as llvm
     from numba.cuda.compiler import _compile_pyfunc_with_fixup
 
@@ -480,8 +484,45 @@ def _compile_to_llvm_bitcode(func, sig) -> bytes:
     for extra in llvm_modules[1:]:
         other = llvm.parse_assembly(extra)
         mod.link_in(other)
-
     mod.verify()
+
+    # Numba generates: i8* @func_name(i8* %a, i8* %b, ...)
+    # C side expects:  void @func_name(i8* %a, i8* %b, ...)
+    # Rename the numba function and create a void-return wrapper.
+    func_name = func.__name__
+    ir_text = str(mod)
+
+    pattern = rf'define\s+(?:linkonce_odr\s+)?(?:i8\*|ptr)\s+@"?{re.escape(func_name)}"?\s*\('
+    if re.search(pattern, ir_text):
+        internal_name = f"_numba_inner_{func_name}"
+
+        # Replace both quoted and unquoted references
+        ir_text = re.sub(
+            rf'@"?{re.escape(func_name)}"?(?=[\s(,])',
+            f'@{internal_name}',
+            ir_text,
+        )
+        ir_text = ir_text.replace(
+            f'@_ZN08NumbaEnv{func_name}',
+            f'@_ZN08NumbaEnv{internal_name}',
+        )
+
+        n_params = len(sig.args)
+        params_decl = ", ".join(f"ptr %p{i}" for i in range(n_params))
+        params_call = ", ".join(f"ptr %p{i}" for i in range(n_params))
+
+        wrapper = f"""
+define void @{func_name}({params_decl}) alwaysinline {{
+entry:
+  call ptr @{internal_name}({params_call})
+  ret void
+}}
+"""
+        ir_text += wrapper
+
+        mod = llvm.parse_assembly(ir_text)
+        mod.verify()
+
     return mod.as_bitcode()
 
 

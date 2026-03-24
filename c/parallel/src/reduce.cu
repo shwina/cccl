@@ -50,6 +50,8 @@ std::string get_cpp_type_name(cccl_type_enum type)
       return "float";
     case CCCL_FLOAT64:
       return "double";
+    case CCCL_BOOLEAN:
+      return "bool";
     default:
       return "";
   }
