@@ -370,7 +370,7 @@ std::string generate_reduce_source(
   // Input iterator
   if (input_it.type == CCCL_POINTER)
   {
-    src += "    input_it_t input = static_cast<accum_t*>(d_input_state);\n";
+    src += "    input_it_t input = static_cast<input_it_t>(d_input_state);\n";
   }
   else
   {
