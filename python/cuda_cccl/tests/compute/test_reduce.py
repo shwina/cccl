@@ -22,15 +22,10 @@ from cuda.compute import (
     gpu_struct,
 )
 
-# Iterator C++ source compilation needs CCCL headers in compileToDeviceBitcode
-_xfail_iterator = pytest.mark.xfail(
-    reason="Iterator C++ source compilation needs CCCL headers in clangjit",
-    strict=False,
-)
 # float16 ops can't be compiled by clang (cuda_fp16.h incompatibility)
 _xfail_fp16 = pytest.mark.xfail(
     reason="float16 not supported with clangjit (cuda_fp16.h)",
-    strict=False,
+    strict=True,
 )
 
 
@@ -206,7 +201,6 @@ def use_numpy_array(request):
     return request.param
 
 
-@_xfail_iterator
 def test_device_sum_cache_modified_input_it(
     use_numpy_array, supported_value_type, num_items=3, start_sum_with=10
 ):
@@ -221,7 +215,6 @@ def test_device_sum_cache_modified_input_it(
     )
 
 
-@_xfail_iterator
 def test_device_sum_constant_it(
     use_numpy_array, supported_value_type, num_items=3, start_sum_with=10
 ):
@@ -234,7 +227,6 @@ def test_device_sum_constant_it(
     )
 
 
-@_xfail_iterator
 def test_device_sum_counting_it(
     use_numpy_array, supported_value_type, num_items=3, start_sum_with=10
 ):
@@ -259,7 +251,6 @@ def test_device_sum_counting_it(
         ("int64", "float32"),
     ],
 )
-@_xfail_iterator
 def test_device_sum_map_mul2_count_it(
     use_numpy_array, value_type_name_pair, num_items=3, start_sum_with=10
 ):
@@ -280,7 +271,6 @@ def test_device_sum_map_mul2_count_it(
         (2, 2, "float64", "float32", "int16"),
     ],
 )
-@_xfail_iterator
 def test_device_sum_map_mul_map_mul_count_it(
     use_numpy_array,
     fac_out,
@@ -318,7 +308,6 @@ def test_device_sum_map_mul_map_mul_count_it(
         ("int32", "int64"),
     ],
 )
-@_xfail_iterator
 def test_device_sum_map_mul2_cp_array_it(
     use_numpy_array, value_type_name_pair, num_items=3, start_sum_with=10
 ):
@@ -335,7 +324,6 @@ def test_device_sum_map_mul2_cp_array_it(
     )
 
 
-@_xfail_iterator
 def test_reducer_caching():
     def sum_op(x, y):
         return x + y
@@ -716,7 +704,6 @@ def test_device_reduce_well_known_maximum():
     assert (d_output == expected_output).all()
 
 
-@_xfail_iterator
 def test_cache_modified_input_iterator():
     def add_op(a, b):
         return a + b
@@ -735,7 +722,6 @@ def test_cache_modified_input_iterator():
     assert (d_output == expected_output).all()
 
 
-@_xfail_iterator
 def test_constant_iterator():
     def add_op(a, b):
         return a + b
@@ -753,7 +739,6 @@ def test_constant_iterator():
     assert (d_output == expected_output).all()
 
 
-@_xfail_iterator
 def test_counting_iterator():
     def add_op(a, b):
         return a + b
@@ -773,7 +758,6 @@ def test_counting_iterator():
     assert (d_output == expected_output).all()
 
 
-@_xfail_iterator
 def test_transform_iterator():
     def add_op(a, b):
         return a + b
@@ -820,7 +804,6 @@ def test_reduce_struct_type():
 
 
 @pytest.mark.no_verify_sass(reason="LDL/STL instructions emitted for this test.")
-@_xfail_iterator
 def test_reduce_struct_type_minmax():
     @gpu_struct
     class MinMax:
@@ -863,7 +846,6 @@ def test_reduce_struct_type_minmax():
     assert actual == expected
 
 
-@_xfail_iterator
 def test_reduce_transform_output_iterator(floating_array):
     """Test reduce with TransformOutputIterator."""
     dtype = floating_array.dtype
