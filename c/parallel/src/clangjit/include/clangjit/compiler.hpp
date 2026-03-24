@@ -11,6 +11,12 @@ struct CompilationResult {
     std::string diagnostics;       // Compiler messages
 };
 
+struct BitcodeResult {
+    bool success;
+    std::string bitcode;       // LLVM bitcode bytes
+    std::string diagnostics;
+};
+
 struct LinkResult {
     bool success;
     std::string library_path;  // Path to .so file
@@ -24,6 +30,12 @@ class CUDACompiler {
 public:
     CUDACompiler();
     ~CUDACompiler();
+
+    // Compile CUDA device source to LLVM bitcode
+    BitcodeResult compileToDeviceBitcode(
+        const std::string& source_code,
+        const CompilerConfig& config
+    );
 
     // Compile CUDA source code to object file
     CompilationResult compileToObject(

@@ -8,169 +8,198 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <cub/detail/choose_offset.cuh>
-#include <cub/detail/launcher/cuda_driver.cuh>
-#include <cub/device/device_reduce.cuh>
-#include <cub/util_device.cuh>
-
-#include <cuda/std/algorithm>
-#include <cuda/std/cstdint>
-#include <cuda/std/functional> // ::cuda::std::identity
-#include <cuda/std/variant>
-
-#include <format>
-#include <memory>
-#include <vector>
-
-#include "jit_templates/templates/input_iterator.h"
-#include "jit_templates/templates/operation.h"
-#include "jit_templates/templates/output_iterator.h"
-#include "jit_templates/traits.h"
-#include "util/context.h"
-#include "util/errors.h"
-#include "util/indirect_arg.h"
-#include "util/types.h"
 #include <cccl/c/reduce.h>
-#include <nvrtc/command_list.h>
-#include <nvrtc/ltoir_list_appender.h>
-#include <util/build_utils.h>
 
-struct device_reduce_policy;
-using TransformOpT = ::cuda::std::identity;
-using OffsetT      = unsigned long long;
-static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
+#include <clangjit/config.hpp>
+#include <clangjit/jit_compiler.hpp>
 
-namespace reduce
+#include <cstdio>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <memory>
+#include <string>
+
+namespace
 {
-static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*input_it*/, cccl_value_t init)
+
+std::string get_cpp_type_name(cccl_type_enum type)
 {
-  // TODO Should be decltype(op(init, *input_it)) but haven't implemented type arithmetic yet
-  //      so switching back to the old accumulator type logic for now
-  return init.type;
+  switch (type)
+  {
+    case CCCL_INT8:
+      return "char";
+    case CCCL_INT16:
+      return "short";
+    case CCCL_INT32:
+      return "int";
+    case CCCL_INT64:
+      return "long long";
+    case CCCL_UINT8:
+      return "unsigned char";
+    case CCCL_UINT16:
+      return "unsigned short";
+    case CCCL_UINT32:
+      return "unsigned int";
+    case CCCL_UINT64:
+      return "unsigned long long";
+    case CCCL_FLOAT32:
+      return "float";
+    case CCCL_FLOAT64:
+      return "double";
+    default:
+      return "";
+  }
 }
 
-std::string get_single_tile_kernel_name(
-  std::string_view input_iterator_t,
-  std::string_view output_iterator_t,
-  std::string_view reduction_op_t,
-  cccl_value_t init,
-  std::string_view accum_cpp_t,
-  bool is_second_kernel)
+std::string get_well_known_op_body(cccl_op_kind_t kind, const std::string& type_name)
 {
-  std::string chained_policy_t;
-  check(cccl_type_name_from_nvrtc<device_reduce_policy>(&chained_policy_t));
-
-  const std::string init_t = cccl_type_enum_to_name(init.type.type);
-
-  std::string offset_t;
-  if (is_second_kernel)
+  switch (kind)
   {
-    // Second kernel is always invoked with an int offset.
-    // See the definition of the local variable `reduce_grid_size`
-    // in DispatchReduce::InvokePasses.
-    check(cccl_type_name_from_nvrtc<int>(&offset_t));
+    case CCCL_PLUS:
+      return std::format(
+        "    {0}* a = ({0}*)a_ptr; {0}* b = ({0}*)b_ptr; {0}* out = ({0}*)out_ptr;\n"
+        "    *out = *a + *b;\n",
+        type_name);
+    case CCCL_MINIMUM:
+      return std::format(
+        "    {0}* a = ({0}*)a_ptr; {0}* b = ({0}*)b_ptr; {0}* out = ({0}*)out_ptr;\n"
+        "    *out = (*a < *b) ? *a : *b;\n",
+        type_name);
+    case CCCL_MAXIMUM:
+      return std::format(
+        "    {0}* a = ({0}*)a_ptr; {0}* b = ({0}*)b_ptr; {0}* out = ({0}*)out_ptr;\n"
+        "    *out = (*a > *b) ? *a : *b;\n",
+        type_name);
+    case CCCL_BIT_AND:
+      return std::format(
+        "    {0}* a = ({0}*)a_ptr; {0}* b = ({0}*)b_ptr; {0}* out = ({0}*)out_ptr;\n"
+        "    *out = *a & *b;\n",
+        type_name);
+    case CCCL_BIT_OR:
+      return std::format(
+        "    {0}* a = ({0}*)a_ptr; {0}* b = ({0}*)b_ptr; {0}* out = ({0}*)out_ptr;\n"
+        "    *out = *a | *b;\n",
+        type_name);
+    case CCCL_BIT_XOR:
+      return std::format(
+        "    {0}* a = ({0}*)a_ptr; {0}* b = ({0}*)b_ptr; {0}* out = ({0}*)out_ptr;\n"
+        "    *out = *a ^ *b;\n",
+        type_name);
+    case CCCL_MULTIPLIES:
+      return std::format(
+        "    {0}* a = ({0}*)a_ptr; {0}* b = ({0}*)b_ptr; {0}* out = ({0}*)out_ptr;\n"
+        "    *out = *a * *b;\n",
+        type_name);
+    default:
+      return "";
+  }
+}
+
+// Generate the CUDA source for the reduction
+std::string generate_reduce_source(
+  cccl_iterator_t input_it, cccl_iterator_t /*output_it*/, cccl_op_t op, cccl_value_t init, bool has_extern_op)
+{
+  const size_t value_size      = init.type.size;
+  const size_t value_alignment = init.type.alignment;
+  const auto type_name         = get_cpp_type_name(init.type.type);
+  const bool use_typed         = !type_name.empty() && input_it.type == CCCL_POINTER;
+
+  // Use the operation's name, falling back to "user_op"
+  const std::string op_name = (op.name && op.name[0]) ? op.name : "user_op";
+
+  std::string src;
+
+  src += "#include <cuda_runtime.h>\n";
+  src += "#include <cub/device/device_reduce.cuh>\n\n";
+
+  if (has_extern_op)
+  {
+    // Operation provided as linked bitcode - declare extern with matching name
+    src += std::format("extern \"C\" __device__ void {}(void* a_ptr, void* b_ptr, void* out_ptr);\n\n", op_name);
+  }
+  else if (op.type >= CCCL_PLUS && op.type <= CCCL_MAXIMUM)
+  {
+    // Well-known operation - generate inline
+    src += std::format("extern \"C\" __device__ void {}(void* a_ptr, void* b_ptr, void* out_ptr) {{\n", op_name);
+    src += get_well_known_op_body(op.type, type_name.empty() ? "char" : type_name);
+    src += "}\n\n";
+  }
+
+  if (use_typed)
+  {
+    // Use the actual C++ type for better codegen
+    src += std::format("using value_t = {};\n\n", type_name);
   }
   else
   {
-    check(cccl_type_name_from_nvrtc<OffsetT>(&offset_t));
+    // Generic storage type for custom types
+    src += std::format(
+      "struct __align__({}) value_t {{\n"
+      "  char data[{}];\n"
+      "}};\n\n",
+      value_alignment,
+      value_size);
   }
 
-  return std::format(
-    "cub::detail::reduce::DeviceReduceSingleTileKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}>",
-    chained_policy_t,
-    input_iterator_t,
-    output_iterator_t,
-    offset_t,
-    reduction_op_t,
-    init_t,
-    accum_cpp_t);
+  src += std::format(
+    "struct ReduceOp {{\n"
+    "  __device__ __forceinline__\n"
+    "  value_t operator()(const value_t& a, const value_t& b) const {{\n"
+    "    value_t result;\n"
+    "    {}((void*)&a, (void*)&b, (void*)&result);\n"
+    "    return result;\n"
+    "  }}\n"
+    "}};\n\n",
+    op_name);
+
+  // Export the reduce function
+  src += "#ifdef _WIN32\n"
+         "#define EXPORT __declspec(dllexport)\n"
+         "#else\n"
+         "#define EXPORT __attribute__((visibility(\"default\")))\n"
+         "#endif\n\n";
+
+  src += "extern \"C\" EXPORT int cccl_jit_reduce(\n"
+         "    void* d_temp_storage,\n"
+         "    size_t* temp_storage_bytes,\n"
+         "    void* d_input,\n"
+         "    void* d_output,\n"
+         "    unsigned long long num_items,\n"
+         "    void* init_ptr)\n"
+         "{\n"
+         "    value_t* input = static_cast<value_t*>(d_input);\n"
+         "    value_t* output = static_cast<value_t*>(d_output);\n"
+         "    value_t init = *static_cast<value_t*>(init_ptr);\n"
+         "    ReduceOp op;\n"
+         "\n"
+         "    cudaError_t err = cub::DeviceReduce::Reduce(\n"
+         "        d_temp_storage, *temp_storage_bytes,\n"
+         "        input, output, (int)num_items, op, init);\n"
+         "\n"
+         "    if (d_temp_storage != nullptr) {\n"
+         "        cudaError_t sync_err = cudaDeviceSynchronize();\n"
+         "        if (err == cudaSuccess) err = sync_err;\n"
+         "    }\n"
+         "\n"
+         "    return (int)err;\n"
+         "}\n";
+
+  return src;
 }
 
-std::string get_device_reduce_kernel_name(
-  std::string_view reduction_op_t, std::string_view input_iterator_t, std::string_view accum_t)
+bool write_bitcode_file(const char* data, size_t size, const std::string& path)
 {
-  std::string chained_policy_t;
-  check(cccl_type_name_from_nvrtc<device_reduce_policy>(&chained_policy_t));
-
-  std::string offset_t;
-  check(cccl_type_name_from_nvrtc<OffsetT>(&offset_t));
-
-  std::string transform_op_t;
-  check(cccl_type_name_from_nvrtc<cuda::std::identity>(&transform_op_t));
-
-  return std::format(
-    "cub::detail::reduce::DeviceReduceKernel<{0}, {1}, {2}, {3}, {4}, {5}>",
-    chained_policy_t,
-    input_iterator_t,
-    offset_t,
-    reduction_op_t,
-    accum_t,
-    transform_op_t);
+  std::ofstream f(path, std::ios::binary);
+  if (!f)
+  {
+    return false;
+  }
+  f.write(data, static_cast<std::streamsize>(size));
+  return f.good();
 }
 
-std::string get_device_reduce_nondeterministic_kernel_name(
-  std::string_view input_iterator_t,
-  std::string_view output_iterator_t,
-  std::string_view reduction_op_t,
-  std::string_view accum_t,
-  cccl_value_t init)
-{
-  std::string chained_policy_t;
-  check(cccl_type_name_from_nvrtc<device_reduce_policy>(&chained_policy_t));
-
-  std::string offset_t;
-  check(cccl_type_name_from_nvrtc<OffsetT>(&offset_t));
-
-  std::string transform_op_t;
-  check(cccl_type_name_from_nvrtc<cuda::std::identity>(&transform_op_t));
-
-  const std::string init_t = cccl_type_enum_to_name(init.type.type);
-
-  return std::format(
-    "cub::detail::reduce::NondeterministicDeviceReduceAtomicKernel<{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}>",
-    chained_policy_t,
-    input_iterator_t,
-    output_iterator_t,
-    offset_t,
-    reduction_op_t,
-    accum_t,
-    init_t,
-    transform_op_t);
-}
-
-struct reduce_kernel_source
-{
-  cccl_device_reduce_build_result_t& build;
-
-  std::size_t AccumSize() const
-  {
-    return build.accumulator_size;
-  }
-  CUkernel SingleTileKernel() const
-  {
-    return build.single_tile_kernel;
-  }
-  CUkernel SingleTileSecondKernel() const
-  {
-    return build.single_tile_second_kernel;
-  }
-  CUkernel ReductionKernel() const
-  {
-    return build.reduction_kernel;
-  }
-  CUkernel NondeterministicAtomicKernel() const
-  {
-    return build.nondeterministic_atomic_kernel;
-  }
-  size_t InitSize() const
-  {
-    return build.accumulator_size;
-  }
-};
-} // namespace reduce
-
-struct reduce_iterator_tag;
-struct reduction_operation_tag;
+} // anonymous namespace
 
 CUresult cccl_device_reduce_build_ex(
   cccl_device_reduce_build_result_t* build,
@@ -181,214 +210,86 @@ CUresult cccl_device_reduce_build_ex(
   cccl_determinism_t determinism,
   int cc_major,
   int cc_minor,
-  const char* cub_path,
-  const char* thrust_path,
-  const char* libcudacxx_path,
-  const char* ctk_path,
-  cccl_build_config* config)
+  const char* /*cub_path*/,
+  const char* /*thrust_path*/,
+  const char* /*libcudacxx_path*/,
+  const char* /*ctk_path*/,
+  cccl_build_config* /*config*/)
 try
 {
-  if (determinism == CCCL_NOT_GUARANTEED && (op.type != CCCL_PLUS || output_it.type != CCCL_POINTER))
+  // Determine if the operation is provided as linked bitcode
+  const bool has_extern_op = (op.type == CCCL_STATELESS || op.type == CCCL_STATEFUL) && op.code != nullptr
+                          && op.code_size > 0;
+
+  // Generate the CUDA source
+  std::string cuda_source = generate_reduce_source(input_it, output_it, op, init, has_extern_op);
+
+  // Set up clangjit compiler
+  clangjit::CompilerConfig config = clangjit::detectDefaultConfig();
+  config.sm_version               = cc_major * 10 + cc_minor;
+  config.verbose                  = false;
+
+  // If operation has bitcode, write it to a temp file and add to config
+  std::string bitcode_path;
+  if (has_extern_op)
   {
-    fflush(stderr);
-    printf("\nERROR in cccl_device_reduce_build(): non-deterministic reduce with non-plus operator or non-pointer "
-           "output iterator is not supported\n");
-    fflush(stdout);
-    return CUDA_ERROR_INVALID_VALUE;
+    bitcode_path =
+      (std::filesystem::temp_directory_path() / ("cccl_reduce_op_" + std::to_string(reinterpret_cast<uintptr_t>(build))
+                                                 + ".bc"))
+        .string();
+    if (!write_bitcode_file(op.code, op.code_size, bitcode_path))
+    {
+      fprintf(stderr, "\nERROR: Failed to write operation bitcode file\n");
+      return CUDA_ERROR_UNKNOWN;
+    }
+    config.device_bitcode_files.push_back(bitcode_path);
   }
 
-  if (determinism == CCCL_GPU_TO_GPU)
+  // Compile
+  auto* compiler = new clangjit::JITCompiler(config);
+
+  if (!compiler->compile(cuda_source))
   {
-    fflush(stderr);
-    printf("\nERROR in cccl_device_reduce_build(): gpu-to-gpu determinism is not supported\n");
-    fflush(stdout);
-    return CUDA_ERROR_INVALID_VALUE;
+    fprintf(stderr, "\nERROR in cccl_device_reduce_build(): %s\n", compiler->getLastError().c_str());
+    delete compiler;
+    if (!bitcode_path.empty())
+    {
+      std::filesystem::remove(bitcode_path);
+    }
+    return CUDA_ERROR_UNKNOWN;
   }
 
-  const char* name = "device_reduce";
-
-  const cccl_type_info accum_t = reduce::get_accumulator_type(op, input_it, init);
-  const auto accum_cpp         = cccl_type_enum_to_name(accum_t.type);
-
-  const auto [input_iterator_name, input_iterator_src] =
-    get_specialization<reduce_iterator_tag>(template_id<input_iterator_traits>(), input_it);
-  const auto [output_iterator_name, output_iterator_src] =
-    get_specialization<reduce_iterator_tag>(template_id<output_iterator_traits>(), output_it, accum_t);
-
-  const auto [op_name, op_src] =
-    get_specialization<reduction_operation_tag>(template_id<binary_user_operation_traits>(), op, accum_t);
-
-  const auto offset_t = cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT64);
-
-  const auto policy_sel = [&] {
-    using namespace cub::detail;
-
-    auto accum_type = type_t::other;
-    if (accum_t.type == CCCL_FLOAT32)
-    {
-      accum_type = type_t::float32;
-    }
-    else if (accum_t.type == CCCL_FLOAT64)
-    {
-      accum_type = type_t::float64;
-    }
-
-    auto operation_t = op_kind_t::other;
-    switch (op.type)
-    {
-      case CCCL_PLUS:
-        operation_t = op_kind_t::plus;
-        break;
-      case CCCL_MINIMUM:
-        operation_t = op_kind_t::min;
-        break;
-      case CCCL_MAXIMUM:
-        operation_t = op_kind_t::max;
-        break;
-      default:
-        break;
-    }
-
-    const int offset_size = int{sizeof(OffsetT)};
-    return cub::detail::reduce::policy_selector{accum_type, operation_t, offset_size, static_cast<int>(accum_t.size)};
-  }();
-
-  // TODO(bgruber): drop this if tuning policies become formattable
-  std::stringstream policy_sel_str;
-  policy_sel_str << policy_sel(cuda::to_arch_id(cuda::compute_capability{cc_major, cc_minor}));
-
-  auto policy_hub_expr =
-    std::format("cub::detail::reduce::policy_selector_from_types<{}, {}, {}>", accum_cpp, offset_t, op_name);
-
-  std::string final_src = std::format(
-    R"XXX(
-#include <cub/device/dispatch/tuning/tuning_reduce.cuh>
-#include <cub/device/dispatch/kernels/kernel_reduce.cuh>
-{0}
-struct __align__({2}) storage_t {{
-  char data[{1}];
-}};
-{3}
-{4}
-{5}
-using device_reduce_policy = {6};
-using namespace cub;
-using namespace cub::detail::reduce;
-static_assert(device_reduce_policy()(::cuda::arch_id{{CUB_PTX_ARCH / 10}}) == {7}, "Host generated and JIT compiled policy mismatch");
-)XXX",
-    jit_template_header_contents, // 0
-    input_it.value_type.size, // 1
-    input_it.value_type.alignment, // 2
-    input_iterator_src, // 3
-    output_iterator_src, // 4
-    op_src, // 5
-    policy_hub_expr, // 6
-    policy_sel_str.view()); // 7
-
-#if false // CCCL_DEBUGGING_SWITCH
-  fflush(stderr);
-  printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", final_src.c_str());
-  fflush(stdout);
-#endif
-
-  std::string single_tile_kernel_name =
-    reduce::get_single_tile_kernel_name(input_iterator_name, output_iterator_name, op_name, init, accum_cpp, false);
-  std::string single_tile_second_kernel_name = reduce::get_single_tile_kernel_name(
-    cccl_type_enum_to_name(accum_t.type, true), output_iterator_name, op_name, init, accum_cpp, true);
-  std::string reduction_kernel_name = reduce::get_device_reduce_kernel_name(op_name, input_iterator_name, accum_cpp);
-  std::string single_tile_kernel_lowered_name;
-  std::string single_tile_second_kernel_lowered_name;
-  std::string reduction_kernel_lowered_name;
-  std::string nondeterministic_kernel_lowered_name;
-
-  // Only build nondeterministic kernel for CCCL_NOT_GUARANTEED (which requires plus op)
-  const bool build_nondeterministic = (determinism == CCCL_NOT_GUARANTEED);
-  std::string nondeterministic_kernel_name;
-  if (build_nondeterministic)
+  // Clean up temp bitcode file
+  if (!bitcode_path.empty())
   {
-    nondeterministic_kernel_name = reduce::get_device_reduce_nondeterministic_kernel_name(
-      input_iterator_name, output_iterator_name, op_name, accum_cpp, init);
+    std::filesystem::remove(bitcode_path);
   }
 
-  const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
-
-  // Build compilation arguments
-  std::vector<const char*> args = {
-    arch.c_str(),
-    cub_path,
-    thrust_path,
-    libcudacxx_path,
-    ctk_path,
-    "-rdc=true",
-    "-dlto",
-    "-DCUB_DISABLE_CDP",
-    "-std=c++20"};
-
-  // Add user's extra flags if config is provided
-  cccl::detail::extend_args_with_build_config(args, config);
-
-  constexpr size_t num_lto_args   = 2;
-  const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
-
-  // Collect all LTO-IRs to be linked.
-  nvrtc_linkable_list linkable_list;
-  nvrtc_linkable_list_appender appender{linkable_list};
-
-  appender.append_operation(op);
-  appender.add_iterator_definition(input_it);
-  appender.add_iterator_definition(output_it);
-
-  nvrtc_link_result result =
-    begin_linking_nvrtc_program(num_lto_args, lopts)
-      ->add_program(nvrtc_translation_unit{final_src.c_str(), name})
-      ->add_expression({single_tile_kernel_name})
-      ->add_expression({single_tile_second_kernel_name})
-      ->add_expression({reduction_kernel_name})
-      ->add_expression_if(build_nondeterministic, {nondeterministic_kernel_name})
-      ->compile_program({args.data(), args.size()})
-      ->get_name({single_tile_kernel_name, single_tile_kernel_lowered_name})
-      ->get_name({single_tile_second_kernel_name, single_tile_second_kernel_lowered_name})
-      ->get_name({reduction_kernel_name, reduction_kernel_lowered_name})
-      ->get_name_if(build_nondeterministic, {nondeterministic_kernel_name, nondeterministic_kernel_lowered_name})
-      ->link_program()
-      ->add_link_list(linkable_list)
-      ->finalize_program();
-
-  cuLibraryLoadData(&build->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(&build->single_tile_kernel, build->library, single_tile_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(
-    &build->single_tile_second_kernel, build->library, single_tile_second_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build->reduction_kernel, build->library, reduction_kernel_lowered_name.c_str()));
-  if (build_nondeterministic)
+  // Get the reduce function pointer
+  using reduce_fn_t = int (*)(void*, size_t*, void*, void*, unsigned long long, void*);
+  auto reduce_fn    = compiler->getFunction<reduce_fn_t>("cccl_jit_reduce");
+  if (!reduce_fn)
   {
-    check(cuLibraryGetKernel(
-      &build->nondeterministic_atomic_kernel, build->library, nondeterministic_kernel_lowered_name.c_str()));
+    fprintf(stderr, "\nERROR: Failed to get reduce function: %s\n", compiler->getLastError().c_str());
+    delete compiler;
+    return CUDA_ERROR_UNKNOWN;
   }
 
   build->cc               = cc_major * 10 + cc_minor;
-  build->cubin            = (void*) result.data.release();
-  build->cubin_size       = result.size;
-  build->accumulator_size = accum_t.size;
+  build->cubin            = nullptr;
+  build->cubin_size       = 0;
+  build->jit_compiler     = compiler;
+  build->reduce_fn        = reinterpret_cast<void*>(reduce_fn);
+  build->accumulator_size = init.type.size;
   build->determinism      = determinism;
-  build->runtime_policy   = new cub::detail::reduce::policy_selector{policy_sel};
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
-  fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_reduce_build(): %s\n", exc.what());
-  fflush(stdout);
-
+  fprintf(stderr, "\nEXCEPTION in cccl_device_reduce_build(): %s\n", exc.what());
   return CUDA_ERROR_UNKNOWN;
 }
-
-// c.parallel provides two separate reduce functions, one for each determinism
-// level, rather than a single function with a runtime switch. This mirrors CUB's
-// design, which uses distinct dispatch functions because the host-side logic
-// differs between determinism levels. Keeping the functions separate avoids
-// branching at runtime to select the appropriate one; cuda.compute selects the
-// appropriate function to call at build time.
 
 CUresult cccl_device_reduce(
   cccl_device_reduce_build_result_t build,
@@ -397,52 +298,29 @@ CUresult cccl_device_reduce(
   cccl_iterator_t d_in,
   cccl_iterator_t d_out,
   uint64_t num_items,
-  cccl_op_t op,
+  cccl_op_t /*op*/,
   cccl_value_t init,
-  CUstream stream)
+  CUstream /*stream*/)
 {
-  assert(build.determinism == CCCL_RUN_TO_RUN);
-
-  bool pushed    = false;
-  CUresult error = CUDA_SUCCESS;
   try
   {
-    pushed = try_push_context();
+    using reduce_fn_t = int (*)(void*, size_t*, void*, void*, unsigned long long, void*);
+    auto reduce_fn    = reinterpret_cast<reduce_fn_t>(build.reduce_fn);
 
-    CUdevice cu_device;
-    check(cuCtxGetDevice(&cu_device));
+    if (!reduce_fn)
+    {
+      return CUDA_ERROR_INVALID_VALUE;
+    }
 
-    auto exec_status = cub::detail::reduce::dispatch<void>(
-      d_temp_storage,
-      *temp_storage_bytes,
-      indirect_arg_t{d_in}, // could be indirect_iterator_t, but CUB does not need to increment it
-      indirect_arg_t{d_out}, // could be indirect_iterator_t, but CUB does not need to increment it
-      static_cast<OffsetT>(num_items),
-      indirect_arg_t{op},
-      indirect_arg_t{init},
-      stream,
-      ::cuda::std::identity{},
-      *static_cast<cub::detail::reduce::policy_selector*>(build.runtime_policy),
-      reduce::reduce_kernel_source{build},
-      cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
+    int status = reduce_fn(d_temp_storage, temp_storage_bytes, d_in.state, d_out.state, num_items, init.state);
 
-    error = static_cast<CUresult>(exec_status);
+    return (status == 0) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
   }
   catch (const std::exception& exc)
   {
-    fflush(stderr);
-    printf("\nEXCEPTION in cccl_device_reduce(): %s\n", exc.what());
-    fflush(stdout);
-    error = CUDA_ERROR_UNKNOWN;
+    fprintf(stderr, "\nEXCEPTION in cccl_device_reduce(): %s\n", exc.what());
+    return CUDA_ERROR_UNKNOWN;
   }
-
-  if (pushed)
-  {
-    CUcontext dummy;
-    cuCtxPopCurrent(&dummy);
-  }
-
-  return error;
 }
 
 CUresult cccl_device_reduce_nondeterministic(
@@ -456,48 +334,8 @@ CUresult cccl_device_reduce_nondeterministic(
   cccl_value_t init,
   CUstream stream)
 {
-  assert(build.determinism == CCCL_NOT_GUARANTEED);
-
-  bool pushed    = false;
-  CUresult error = CUDA_SUCCESS;
-  try
-  {
-    pushed = try_push_context();
-
-    CUdevice cu_device;
-    check(cuCtxGetDevice(&cu_device));
-
-    auto exec_status = cub::detail::reduce::dispatch_nondeterministic<void>(
-      d_temp_storage,
-      *temp_storage_bytes,
-      indirect_arg_t{d_in}, // could be indirect_iterator_t, but CUB does not need to increment it
-      indirect_arg_t{d_out}, // could be indirect_iterator_t, but CUB does not need to increment it
-      static_cast<OffsetT>(num_items),
-      indirect_arg_t{op},
-      indirect_arg_t{init},
-      stream,
-      ::cuda::std::identity{},
-      *static_cast<cub::detail::reduce::policy_selector*>(build.runtime_policy),
-      reduce::reduce_kernel_source{build},
-      cub::detail::CudaDriverLauncherFactory{cu_device, build.cc});
-
-    error = static_cast<CUresult>(exec_status);
-  }
-  catch (const std::exception& exc)
-  {
-    fflush(stderr);
-    printf("\nEXCEPTION in cccl_device_reduce(): %s\n", exc.what());
-    fflush(stdout);
-    error = CUDA_ERROR_UNKNOWN;
-  }
-
-  if (pushed)
-  {
-    CUcontext dummy;
-    cuCtxPopCurrent(&dummy);
-  }
-
-  return error;
+  // For now, nondeterministic uses the same path as deterministic
+  return cccl_device_reduce(build, d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, op, init, stream);
 }
 
 CUresult cccl_device_reduce_cleanup(cccl_device_reduce_build_result_t* build_ptr)
@@ -508,19 +346,18 @@ try
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  using namespace cub::detail::reduce;
-  std::unique_ptr<char[]> cubin(static_cast<char*>(build_ptr->cubin));
-  std::unique_ptr<policy_selector> policy(static_cast<policy_selector*>(build_ptr->runtime_policy));
-  check(cuLibraryUnload(build_ptr->library));
+  if (build_ptr->jit_compiler)
+  {
+    delete static_cast<clangjit::JITCompiler*>(build_ptr->jit_compiler);
+    build_ptr->jit_compiler = nullptr;
+  }
+  build_ptr->reduce_fn = nullptr;
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
-  fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_reduce_cleanup(): %s\n", exc.what());
-  fflush(stdout);
-
+  fprintf(stderr, "\nEXCEPTION in cccl_device_reduce_cleanup(): %s\n", exc.what());
   return CUDA_ERROR_UNKNOWN;
 }
 
@@ -540,17 +377,6 @@ CUresult cccl_device_reduce_build(
   const char* ctk_path)
 {
   return cccl_device_reduce_build_ex(
-    build,
-    d_in,
-    d_out,
-    op,
-    init,
-    determinism,
-    cc_major,
-    cc_minor,
-    cub_path,
-    thrust_path,
-    libcudacxx_path,
-    ctk_path,
+    build, d_in, d_out, op, init, determinism, cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, ctk_path,
     nullptr);
 }

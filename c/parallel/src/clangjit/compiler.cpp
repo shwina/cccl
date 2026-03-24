@@ -10,6 +10,7 @@
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/Lex/PreprocessorOptions.h>
 #include <lld/Common/Driver.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
@@ -298,6 +299,141 @@ public:
     diagnostics += diag_output;
 
     return success;
+  }
+
+  BitcodeResult compileToDeviceBitcode(const std::string &source_code,
+                                       const CompilerConfig &config) {
+    BitcodeResult result;
+    result.success = false;
+
+    std::string error_msg;
+    if (!validateConfig(config, &error_msg)) {
+      result.diagnostics = "Configuration error: " + error_msg;
+      return result;
+    }
+
+    initialize_llvm();
+
+    std::string temp_dir =
+        (std::filesystem::temp_directory_path() /
+         ("clangjit_bc_" + std::to_string(reinterpret_cast<uintptr_t>(this))))
+            .string();
+    std::filesystem::create_directories(temp_dir);
+
+    std::string input_file = "input.cu";
+    std::string source_file = temp_dir + "/" + input_file;
+    std::string resource_dir = CLANG_RESOURCE_DIR;
+
+    int ptx_version = 70;
+    if (config.sm_version >= 120)
+      ptx_version = 87;
+    else if (config.sm_version >= 100)
+      ptx_version = 85;
+    else if (config.sm_version >= 90)
+      ptx_version = 80;
+    else if (config.sm_version >= 89)
+      ptx_version = 78;
+    else if (config.sm_version >= 80)
+      ptx_version = 75;
+
+    std::vector<std::string> arg_strings;
+    arg_strings.push_back(source_file);
+    arg_strings.push_back("-triple");
+    arg_strings.push_back("nvptx64-nvidia-cuda");
+    arg_strings.push_back("-aux-triple");
+#ifdef _WIN32
+    arg_strings.push_back("x86_64-pc-windows-msvc");
+#else
+    arg_strings.push_back("x86_64-pc-linux-gnu");
+#endif
+    arg_strings.push_back("-S");
+    arg_strings.push_back("-aux-target-cpu");
+    arg_strings.push_back("x86-64");
+    arg_strings.push_back("-fcuda-is-device");
+    arg_strings.push_back("-fcuda-allow-variadic-functions");
+    arg_strings.push_back("-fgnuc-version=4.2.1");
+    arg_strings.push_back("-mlink-builtin-bitcode");
+    arg_strings.push_back(config.cuda_toolkit_path +
+                          "/nvvm/libdevice/libdevice.10.bc");
+    arg_strings.push_back("-target-sdk-version=12.8");
+    arg_strings.push_back("-target-cpu");
+    arg_strings.push_back("sm_" + std::to_string(config.sm_version));
+    arg_strings.push_back("-target-feature");
+    arg_strings.push_back("+ptx" + std::to_string(ptx_version));
+    arg_strings.push_back("-resource-dir");
+    arg_strings.push_back(resource_dir);
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(config.clangjit_include_path +
+                          "/clangjit/cuda_minimal/stubs");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(config.cuda_toolkit_path + "/include");
+    arg_strings.push_back("-include");
+    arg_strings.push_back(
+        config.clangjit_include_path +
+        "/clangjit/cuda_minimal/__clang_cuda_runtime_wrapper.h");
+    arg_strings.push_back("-D__CLANGJIT_DEVICE_COMPILATION__=1");
+    arg_strings.push_back("-DNDEBUG");
+    arg_strings.push_back("-fdeprecated-macro");
+    arg_strings.push_back("-fcxx-exceptions");
+    arg_strings.push_back("-fexceptions");
+    arg_strings.push_back("-O" + std::to_string(config.optimization_level));
+    arg_strings.push_back("-std=c++17");
+    arg_strings.push_back("-x");
+    arg_strings.push_back("cuda");
+
+    std::vector<const char *> args;
+    for (const auto &arg : arg_strings) {
+      args.push_back(arg.c_str());
+    }
+
+    std::string diag_output;
+    llvm::raw_string_ostream diag_stream(diag_output);
+
+    clang::DiagnosticOptions diag_opts;
+    diag_opts.ShowColors = false;
+    clang::TextDiagnosticPrinter *diag_printer =
+        new clang::TextDiagnosticPrinter(diag_stream, diag_opts);
+    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_ids(
+        new clang::DiagnosticIDs());
+    clang::DiagnosticsEngine diag_engine(diag_ids, diag_opts, diag_printer);
+
+    clang::CompilerInstance compiler;
+    auto &invocation = compiler.getInvocation();
+
+    if (!clang::CompilerInvocation::CreateFromArgs(invocation, args,
+                                                   diag_engine)) {
+      diag_stream.flush();
+      result.diagnostics = diag_output + "\nFailed to create compiler invocation";
+      std::filesystem::remove_all(temp_dir);
+      return result;
+    }
+
+    auto vfs = createVFSWithSource(source_code, source_file);
+    compiler.createDiagnostics(diag_engine.getClient(), false);
+    compiler.setVirtualFileSystem(vfs);
+    compiler.createFileManager();
+
+    llvm::LLVMContext llvm_context;
+    clang::EmitLLVMOnlyAction emit_llvm_action(&llvm_context);
+    bool success = compiler.ExecuteAction(emit_llvm_action);
+
+    if (success) {
+      std::unique_ptr<llvm::Module> mod = emit_llvm_action.takeModule();
+      if (mod) {
+        llvm::SmallVector<char, 0> buffer;
+        llvm::raw_svector_ostream os(buffer);
+        llvm::WriteBitcodeToFile(*mod, os);
+        result.bitcode = std::string(buffer.begin(), buffer.end());
+        result.success = true;
+      } else {
+        result.diagnostics = "Failed to get LLVM module";
+      }
+    }
+
+    diag_stream.flush();
+    result.diagnostics += diag_output;
+    std::filesystem::remove_all(temp_dir);
+    return result;
   }
 
   bool compileHostCode(const std::string &source_code,
@@ -732,6 +868,11 @@ public:
 
 CUDACompiler::CUDACompiler() : impl_(new Impl()) {}
 CUDACompiler::~CUDACompiler() { delete impl_; }
+
+BitcodeResult CUDACompiler::compileToDeviceBitcode(const std::string &source_code,
+                                                   const CompilerConfig &config) {
+  return impl_->compileToDeviceBitcode(source_code, config);
+}
 
 CompilationResult CUDACompiler::compileToObject(const std::string &source_code,
                                                 const std::string &output_path,

@@ -20,10 +20,13 @@ function(cccl_c_parallel_add_test target_name_var source)
     PRIVATE
       cccl.compiler_interface
       cccl.c.parallel
+      clangjit_lib
       CUDA::cudart_static
       CUDA::nvrtc
       cccl.c2h.main
   )
+
+  target_include_directories(${target_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/clangjit/include")
 
   # Get the first CUDA include directory only
   list(GET CUDAToolkit_INCLUDE_DIRS 0 CUDA_FIRST_INCLUDE_DIR)

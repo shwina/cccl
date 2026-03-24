@@ -159,7 +159,10 @@ if(NOT MSVC)
   target_compile_options(clangjit_lib PRIVATE -fno-rtti)
 endif()
 
-set_target_properties(clangjit_lib PROPERTIES CXX_STANDARD 20)
+set_target_properties(clangjit_lib PROPERTIES
+  CXX_STANDARD 20
+  POSITION_INDEPENDENT_CODE ON
+)
 
 # --------------------------------------------------------------------------
 # Examples

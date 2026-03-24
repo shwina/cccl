@@ -84,11 +84,15 @@ target_compile_options(
   PRIVATE $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--extended-lambda>
 )
 
+add_subdirectory(src/clangjit)
+
 target_include_directories(
   cccl.c.parallel #
   PUBLIC "include"
-  PRIVATE "src"
+  PRIVATE "src" "src/clangjit/include"
 )
+
+target_link_libraries(cccl.c.parallel PRIVATE clangjit_lib)
 
 if (CCCL_C_Parallel_ENABLE_TESTING)
   add_subdirectory(test)
@@ -97,5 +101,3 @@ endif()
 if (CCCL_C_Parallel_ENABLE_HEADER_TESTING)
   include(cmake/CParallelHeaderTesting.cmake)
 endif()
-
-add_subdirectory(src/clangjit)

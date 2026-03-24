@@ -27,14 +27,10 @@ typedef struct cccl_device_reduce_build_result_t
   int cc;
   void* cubin;
   size_t cubin_size;
-  CUlibrary library;
+  void* jit_compiler;    // clangjit::JITCompiler*
+  void* reduce_fn;       // Function pointer: int(*)(void*, size_t*, void*, void*, unsigned long long, void*)
   uint64_t accumulator_size;
-  CUkernel single_tile_kernel;
-  CUkernel single_tile_second_kernel;
-  CUkernel reduction_kernel;
-  CUkernel nondeterministic_atomic_kernel;
   cccl_determinism_t determinism;
-  void* runtime_policy;
 } cccl_device_reduce_build_result_t;
 
 // TODO return a union of nvtx/cuda/nvrtc errors or a string?

@@ -28,6 +28,9 @@
 
 #include <nvrtc.h>
 
+#include <clangjit/compiler.hpp>
+#include <clangjit/config.hpp>
+
 #include <c2h/catch2_test_helper.h>
 #include <cccl/c/types.h>
 
@@ -83,33 +86,18 @@ inline std::string inspect_sass(const void* cubin, size_t cubin_size)
 
 inline std::string compile(const std::string& source)
 {
-  // compile source to LTO-IR using nvrtc
+  // Compile source to LLVM bitcode using clangjit (Clang)
+  clangjit::CompilerConfig config = clangjit::detectDefaultConfig();
+  clangjit::CUDACompiler compiler;
 
-  nvrtcProgram prog;
-  REQUIRE(NVRTC_SUCCESS == nvrtcCreateProgram(&prog, source.c_str(), "op.cu", 0, nullptr, nullptr));
-
-  // TEST_CTK_PATH needed to include cuda_fp16.h
-  const char* options[] = {"--std=c++17", "-rdc=true", "-dlto", TEST_CTK_PATH};
-
-  if (nvrtcCompileProgram(prog, 4, options) != NVRTC_SUCCESS)
+  auto result = compiler.compileToDeviceBitcode(source, config);
+  if (!result.success)
   {
-    size_t log_size{};
-    REQUIRE(NVRTC_SUCCESS == nvrtcGetProgramLogSize(prog, &log_size));
-    std::vector<char> log(log_size);
-    REQUIRE(NVRTC_SUCCESS == nvrtcGetProgramLog(prog, log.data()));
-    printf("%s\r\n", log.data());
+    printf("Compilation to LLVM bitcode failed:\n%s\n", result.diagnostics.c_str());
     REQUIRE(false);
   }
 
-  std::size_t ltoir_size{};
-  REQUIRE(NVRTC_SUCCESS == nvrtcGetLTOIRSize(prog, &ltoir_size));
-
-  std::vector<char> ltoir(ltoir_size);
-
-  REQUIRE(NVRTC_SUCCESS == nvrtcGetLTOIR(prog, ltoir.data()));
-  REQUIRE(NVRTC_SUCCESS == nvrtcDestroyProgram(&prog));
-
-  return std::string(ltoir.data(), ltoir_size);
+  return result.bitcode;
 }
 
 template <class T>
@@ -807,7 +795,7 @@ struct stateful_operation_t
 
 inline operation_t make_operation(std::string_view name, const std::string& code)
 {
-  return operation_t{name, compile(code), CCCL_OP_LTOIR};
+  return operation_t{name, compile(code), CCCL_OP_LLVM_IR};
 }
 
 inline operation_t make_cpp_operation(std::string_view name, const std::string& cpp_code)
