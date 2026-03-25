@@ -245,6 +245,17 @@ inline __host__ double __signbitd(double x) { return std::signbit(x); }
 // These supplement clang's device functions with overloads CUB expects
 #ifdef __CLANGJIT_DEVICE_COMPILATION__
 
+// Cluster/barrier intrinsics (not in upstream __clang_cuda_device_functions.h)
+__device__ inline void __cluster_barrier_wait() {
+    __nvvm_barrier_cluster_wait();
+}
+__device__ inline void __barrier_sync_count(unsigned int id, unsigned int count) {
+    __nvvm_barrier_sync_cnt(id, count);
+}
+__device__ inline void __cluster_barrier_arrive_relaxed() {
+    __nvvm_barrier_cluster_arrive_relaxed();
+}
+
 // Warp synchronization
 __device__ inline void __syncwarp(unsigned __mask = 0xFFFFFFFF) {
     __nvvm_bar_warp_sync(__mask);
@@ -444,6 +455,11 @@ __CLANGJIT_CACHE_LOAD(__ldlu, "ld.global.lu")
 #else // !__CLANGJIT_DEVICE_COMPILATION__
 // Host stubs for warp intrinsics - satisfy the parser during host compilation
 // Must be __host__ __device__ because device code templates are still parsed
+
+// Cluster/barrier intrinsics
+__host__ __device__ inline void __cluster_barrier_wait() {}
+__host__ __device__ inline void __barrier_sync_count(unsigned int, unsigned int) {}
+__host__ __device__ inline void __cluster_barrier_arrive_relaxed() {}
 
 // Warp synchronization
 __host__ __device__ inline void __syncwarp(unsigned = 0xFFFFFFFF) {}
