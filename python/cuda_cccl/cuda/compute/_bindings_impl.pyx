@@ -844,14 +844,16 @@ cdef class CommonData:
     cdef bytes encoded_thrust_path
     cdef bytes encoded_libcudacxx_path
     cdef bytes encoded_ctk_path
+    cdef bytes encoded_clang_path
 
-    def __cinit__(self, int cc_major, int cc_minor, str cub_path, str thrust_path, str libcudacxx_path, str ctk_path):
+    def __cinit__(self, int cc_major, int cc_minor, str cub_path, str thrust_path, str libcudacxx_path, str ctk_path, str clang_path=""):
         self.cc_major = cc_major
         self.cc_minor = cc_minor
         self.encoded_cub_path = cub_path.encode("utf-8")
         self.encoded_thrust_path = thrust_path.encode("utf-8")
         self.encoded_libcudacxx_path = libcudacxx_path.encode("utf-8")
         self.encoded_ctk_path = ctk_path.encode("utf-8")
+        self.encoded_clang_path = clang_path.encode("utf-8") if clang_path else b""
 
     cdef inline int get_cc_major(self):
         return self.cc_major
@@ -870,6 +872,9 @@ cdef class CommonData:
 
     cdef inline const char * ctk_path_get_c_str(self):
         return <const char *>self.encoded_ctk_path if self.encoded_ctk_path else NULL
+
+    cdef inline const char * clang_path_get_c_str(self):
+        return <const char *>self.encoded_clang_path if self.encoded_clang_path else NULL
 
     @property
     def compute_capability(self):
@@ -891,6 +896,10 @@ cdef class CommonData:
     def libcudacxx_path(self):
         return self.encoded_libcudacxx_path.decode("utf-8")
 
+    @property
+    def clang_path(self):
+        return self.encoded_clang_path.decode("utf-8") if self.encoded_clang_path else ""
+
 # --------------
 #   DeviceReduce
 # --------------
@@ -907,7 +916,7 @@ cdef extern from "cccl/c/reduce.h":
         cccl_op_t,
         cccl_value_t,
         cccl_determinism_t,
-        int, int, const char*, const char*, const char*, const char*
+        int, int, const char*, const char*, const char*, const char*, const char*
     ) nogil
 
     cdef CUresult cccl_device_reduce(
@@ -958,6 +967,7 @@ cdef class DeviceReduceBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
         memset(&self.build_data, 0, sizeof(cccl_device_reduce_build_result_t))
 
         with nogil:
@@ -974,6 +984,7 @@ cdef class DeviceReduceBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(

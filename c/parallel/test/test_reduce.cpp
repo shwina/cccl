@@ -54,7 +54,8 @@ struct reduce_build
     const char* cub_path,
     const char* thrust_path,
     const char* libcudacxx_path,
-    const char* ctk_path) const noexcept
+    const char* ctk_path,
+    const char* clang_path = nullptr) const noexcept
   {
     return cccl_device_reduce_build(
       build_ptr,
@@ -68,7 +69,8 @@ struct reduce_build
       cub_path,
       thrust_path,
       libcudacxx_path,
-      ctk_path);
+      ctk_path,
+      clang_path);
   }
 };
 
@@ -93,7 +95,8 @@ struct reduce_build_ex
     const char* cub_path,
     const char* thrust_path,
     const char* libcudacxx_path,
-    const char* ctk_path) const noexcept
+    const char* ctk_path,
+    const char* clang_path = nullptr) const noexcept
   {
     return cccl_device_reduce_build_ex(
       build_ptr,
@@ -108,6 +111,7 @@ struct reduce_build_ex
       thrust_path,
       libcudacxx_path,
       ctk_path,
+      clang_path,
       const_cast<cccl_build_config*>(&config));
   }
 };

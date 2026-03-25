@@ -688,7 +688,7 @@ struct reduce_build
     cccl_value_t init,
     Ts... args) const noexcept
   {
-    return cccl_device_reduce_build(build_ptr, input, output, op, init, determinism, args...);
+    return cccl_device_reduce_build(build_ptr, input, output, op, init, determinism, args..., nullptr);
   }
 };
 

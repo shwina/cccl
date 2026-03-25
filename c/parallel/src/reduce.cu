@@ -572,6 +572,7 @@ CUresult cccl_device_reduce_build_ex(
   const char* /*thrust_path*/,
   const char* /*libcudacxx_path*/,
   const char* /*ctk_path*/,
+  const char* clang_path,
   cccl_build_config* build_config)
 try
 {
@@ -589,6 +590,10 @@ try
   clangjit::CompilerConfig jit_config = clangjit::detectDefaultConfig();
   jit_config.sm_version               = cc_major * 10 + cc_minor;
   jit_config.verbose                  = false;
+  if (clang_path)
+  {
+    jit_config.clang_headers_path = clang_path;
+  }
 
   // Apply extra build configuration
   if (build_config)
@@ -756,9 +761,10 @@ CUresult cccl_device_reduce_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path)
+  const char* ctk_path,
+  const char* clang_path)
 {
   return cccl_device_reduce_build_ex(
     build, d_in, d_out, op, init, determinism, cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, ctk_path,
-    nullptr);
+    clang_path, nullptr);
 }

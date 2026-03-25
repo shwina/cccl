@@ -213,6 +213,12 @@ def get_includes() -> List[str]:
     return opts
 
 
+@functools.lru_cache()
+def get_clang_include_path() -> str:
+    clang = get_include_paths().clang
+    return str(clang) if clang is not None else ""
+
+
 def _check_compile_result(cubin: bytes):
     # check compiled code for LDL/STL instructions
     temp_cubin_file = tempfile.NamedTemporaryFile(delete=False)
@@ -248,9 +254,10 @@ def call_build(build_impl_fn: Callable, *args, **kwargs):
     global _check_sass
 
     cc_major, cc_minor = CudaDevice().compute_capability
-    cub_path, thrust_path, libcudacxx_path, cuda_include_path = get_includes()
+    cub_path, thrust_path, libcudacxx_path, cuda_include_path, _ = get_includes()
+    clang_path = get_clang_include_path()
     common_data = CommonData(
-        cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, cuda_include_path
+        cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, cuda_include_path, clang_path
     )
     result = build_impl_fn(
         *args,

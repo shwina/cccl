@@ -136,6 +136,10 @@ public:
     arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(config.cuda_toolkit_path + "/include");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(config.clang_headers_path.empty()
+                              ? std::string(CLANG_HEADERS_DIR)
+                              : config.clang_headers_path);
     arg_strings.push_back("-include");
     arg_strings.push_back(
         config.clangjit_include_path +
@@ -388,6 +392,10 @@ public:
     arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(config.cuda_toolkit_path + "/include");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(config.clang_headers_path.empty()
+                              ? std::string(CLANG_HEADERS_DIR)
+                              : config.clang_headers_path);
     arg_strings.push_back("-include");
     arg_strings.push_back(
         config.clangjit_include_path +
@@ -507,6 +515,10 @@ public:
     arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(config.cuda_toolkit_path + "/include");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(config.clang_headers_path.empty()
+                              ? std::string(CLANG_HEADERS_DIR)
+                              : config.clang_headers_path);
     arg_strings.push_back("-include");
     arg_strings.push_back(
         config.clangjit_include_path +

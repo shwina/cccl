@@ -85,6 +85,7 @@ cmake_path(GET _c_dir PARENT_PATH _cccl_root)                       # cccl
 target_compile_definitions(clangjit_lib PRIVATE
   CCCL_SOURCE_DIR="${_cccl_root}"
   CLANG_RESOURCE_DIR="${llvm_project_BINARY_DIR}/lib/clang/${LLVM_VERSION_MAJOR}"
+  CLANG_HEADERS_DIR="${llvm_project_SOURCE_DIR}/clang/lib/Headers"
   CLANGJIT_INCLUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
@@ -163,6 +164,12 @@ set_target_properties(clangjit_lib PROPERTIES
   CXX_STANDARD 20
   POSITION_INDEPENDENT_CODE ON
 )
+
+# --------------------------------------------------------------------------
+# Install Clang CUDA headers into wheel (for self-sufficient packaging)
+# --------------------------------------------------------------------------
+file(GLOB _clang_cuda_headers "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__clang_cuda_*")
+install(FILES ${_clang_cuda_headers} DESTINATION "cuda/cccl/headers/clang")
 
 # --------------------------------------------------------------------------
 # Examples

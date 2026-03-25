@@ -19,10 +19,11 @@ class IncludePaths:
     libcudacxx: Optional[Path]
     cub: Optional[Path]
     thrust: Optional[Path]
+    clang: Optional[Path] = None
 
     def as_tuple(self):
         # Note: higher-level ... lower-level order:
-        return (self.thrust, self.cub, self.libcudacxx, self.cuda)
+        return (self.thrust, self.cub, self.libcudacxx, self.cuda, self.clang)
 
 
 @lru_cache()
@@ -43,9 +44,26 @@ def get_include_paths(probe_file: str = "cub/version.cuh") -> IncludePaths:
         else:
             raise RuntimeError("Unable to locate CCCL include directory.")
 
+    clang_incl = None
+    try:
+        with as_file(files("cuda.cccl.headers.clang")) as f:
+            clang_incl = Path(f)
+            if not any(clang_incl.glob("__clang_cuda_*")):
+                clang_incl = None
+    except Exception:
+        pass
+
+    if clang_incl is None:
+        for sp in sys.path:
+            candidate = Path(sp).resolve() / "cuda" / "cccl" / "headers" / "clang"
+            if any(candidate.glob("__clang_cuda_*")):
+                clang_incl = candidate
+                break
+
     return IncludePaths(
         cuda=cuda_incl,
         libcudacxx=cccl_incl,
         cub=cccl_incl,
         thrust=cccl_incl,
+        clang=clang_incl,
     )
