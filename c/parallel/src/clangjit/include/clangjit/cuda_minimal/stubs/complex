@@ -1,8 +1,18 @@
-#ifndef _CLANGJIT_COMPLEX
-#define _CLANGJIT_COMPLEX
-#pragma push_macro("__CUDA_ARCH__")
-#undef __CUDA_ARCH__
-#include <cuda/std/complex>
-#pragma pop_macro("__CUDA_ARCH__")
-namespace std { using namespace cuda::std; }
-#endif
+// Minimal <complex> stub for CCCL freestanding mode
+#ifndef _CLANGJIT_COMPLEX_STUB
+#define _CLANGJIT_COMPLEX_STUB
+
+namespace std {
+
+template <typename T>
+class complex {
+    T re_, im_;
+public:
+    constexpr complex(T re = T(), T im = T()) : re_(re), im_(im) {}
+    constexpr T real() const { return re_; }
+    constexpr T imag() const { return im_; }
+};
+
+} // namespace std
+
+#endif // _CLANGJIT_COMPLEX_STUB

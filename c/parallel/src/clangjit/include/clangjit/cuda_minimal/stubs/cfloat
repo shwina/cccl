@@ -1,8 +1,7 @@
+// Minimal <cfloat> stub for CCCL freestanding mode
 #ifndef _CLANGJIT_CFLOAT
 #define _CLANGJIT_CFLOAT
-#pragma push_macro("__CUDA_ARCH__")
-#undef __CUDA_ARCH__
-#include <cuda/std/cfloat>
-#pragma pop_macro("__CUDA_ARCH__")
-namespace std { using namespace cuda::std; }
-#endif
+
+#include "float.h"
+
+#endif // _CLANGJIT_CFLOAT

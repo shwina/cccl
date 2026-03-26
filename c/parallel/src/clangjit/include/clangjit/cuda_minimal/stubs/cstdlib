@@ -29,27 +29,6 @@ struct lldiv_t {
     long long rem;
 };
 
-// abs functions
-inline constexpr int abs(int n) noexcept {
-    return n < 0 ? -n : n;
-}
-
-inline constexpr long abs(long n) noexcept {
-    return n < 0 ? -n : n;
-}
-
-inline constexpr long long abs(long long n) noexcept {
-    return n < 0 ? -n : n;
-}
-
-inline constexpr long labs(long n) noexcept {
-    return abs(n);
-}
-
-inline constexpr long long llabs(long long n) noexcept {
-    return abs(n);
-}
-
 // div functions
 inline constexpr div_t div(int numer, int denom) noexcept {
     return {numer / denom, numer % denom};
@@ -77,9 +56,6 @@ inline constexpr lldiv_t lldiv(long long numer, long long denom) noexcept {
 using std::div_t;
 using std::ldiv_t;
 using std::lldiv_t;
-using std::abs;
-using std::labs;
-using std::llabs;
 using std::div;
 using std::ldiv;
 using std::lldiv;

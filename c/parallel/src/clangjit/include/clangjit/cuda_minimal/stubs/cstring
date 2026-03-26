@@ -1,12 +1,14 @@
+// Minimal cstring stub for CUDA JIT compilation
 #ifndef _CLANGJIT_CSTRING
 #define _CLANGJIT_CSTRING
-#pragma push_macro("__CUDA_ARCH__")
-#undef __CUDA_ARCH__
-#include <cuda/std/cstring>
-#pragma pop_macro("__CUDA_ARCH__")
-namespace std { using namespace cuda::std; }
-using cuda::std::memcpy;
-using cuda::std::memset;
-using cuda::std::memmove;
-using cuda::std::memcmp;
-#endif
+
+#include "string.h"
+
+namespace std {
+    using ::memcpy;
+    using ::memset;
+    using ::memmove;
+    using ::memcmp;
+}
+
+#endif // _CLANGJIT_CSTRING

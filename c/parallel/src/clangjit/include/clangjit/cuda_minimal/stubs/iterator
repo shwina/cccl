@@ -1,8 +1,49 @@
+// Minimal iterator stub for CUDA JIT compilation
+// Provides iterator category tags needed by libcu++
 #ifndef _CLANGJIT_ITERATOR
 #define _CLANGJIT_ITERATOR
-#pragma push_macro("__CUDA_ARCH__")
-#undef __CUDA_ARCH__
-#include <cuda/std/iterator>
-#pragma pop_macro("__CUDA_ARCH__")
-namespace std { using namespace cuda::std; }
-#endif
+
+#include "cstddef"
+
+namespace std {
+
+// Iterator category tags
+struct input_iterator_tag {};
+struct output_iterator_tag {};
+struct forward_iterator_tag : public input_iterator_tag {};
+struct bidirectional_iterator_tag : public forward_iterator_tag {};
+struct random_access_iterator_tag : public bidirectional_iterator_tag {};
+struct contiguous_iterator_tag : public random_access_iterator_tag {};
+
+// Basic iterator_traits template
+template<class Iterator>
+struct iterator_traits {
+    using difference_type = typename Iterator::difference_type;
+    using value_type = typename Iterator::value_type;
+    using pointer = typename Iterator::pointer;
+    using reference = typename Iterator::reference;
+    using iterator_category = typename Iterator::iterator_category;
+};
+
+// Pointer specialization
+template<class T>
+struct iterator_traits<T*> {
+    using difference_type = ptrdiff_t;
+    using value_type = T;
+    using pointer = T*;
+    using reference = T&;
+    using iterator_category = random_access_iterator_tag;
+};
+
+template<class T>
+struct iterator_traits<const T*> {
+    using difference_type = ptrdiff_t;
+    using value_type = T;
+    using pointer = const T*;
+    using reference = const T&;
+    using iterator_category = random_access_iterator_tag;
+};
+
+} // namespace std
+
+#endif // _CLANGJIT_ITERATOR
