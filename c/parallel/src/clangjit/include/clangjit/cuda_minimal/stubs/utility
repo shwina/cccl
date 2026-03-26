@@ -1,38 +1,8 @@
-// Minimal utility stub for CUDA JIT compilation
 #ifndef _CLANGJIT_UTILITY
 #define _CLANGJIT_UTILITY
-
-#include "type_traits"
-
-namespace std {
-
-template<class T>
-constexpr remove_reference_t<T>&& move(T&& t) noexcept {
-    return static_cast<remove_reference_t<T>&&>(t);
-}
-
-template<class T>
-constexpr T&& forward(remove_reference_t<T>& t) noexcept {
-    return static_cast<T&&>(t);
-}
-
-template<class T>
-constexpr T&& forward(remove_reference_t<T>&& t) noexcept {
-    return static_cast<T&&>(t);
-}
-
-// pair forward declaration
-template<class T1, class T2>
-struct pair;
-
-// swap
-template<class T>
-constexpr void swap(T& a, T& b) noexcept {
-    T tmp = move(a);
-    a = move(b);
-    b = move(tmp);
-}
-
-} // namespace std
-
-#endif // _CLANGJIT_UTILITY
+#pragma push_macro("__CUDA_ARCH__")
+#undef __CUDA_ARCH__
+#include <cuda/std/utility>
+#pragma pop_macro("__CUDA_ARCH__")
+namespace std { using namespace cuda::std; }
+#endif

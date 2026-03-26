@@ -1,7 +1,8 @@
-// Minimal cmath stub for CUDA JIT compilation
 #ifndef _CLANGJIT_CMATH
 #define _CLANGJIT_CMATH
-
-#include "math.h"
-
-#endif // _CLANGJIT_CMATH
+#pragma push_macro("__CUDA_ARCH__")
+#undef __CUDA_ARCH__
+#include <cuda/std/cmath>
+#pragma pop_macro("__CUDA_ARCH__")
+namespace std { using namespace cuda::std; }
+#endif

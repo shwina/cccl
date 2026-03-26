@@ -1,7 +1,8 @@
-// Minimal climits stub for CUDA JIT compilation
 #ifndef _CLANGJIT_CLIMITS
 #define _CLANGJIT_CLIMITS
-
-#include "limits.h"
-
-#endif // _CLANGJIT_CLIMITS
+#pragma push_macro("__CUDA_ARCH__")
+#undef __CUDA_ARCH__
+#include <cuda/std/climits>
+#pragma pop_macro("__CUDA_ARCH__")
+namespace std { using namespace cuda::std; }
+#endif

@@ -56,6 +56,24 @@
 // CLANGJIT: Skip clang math forward declares - requires system headers
 // #include <__clang_cuda_math_forward_declares.h>
 
+// CLANGJIT: Ensure basic types, functions, and float macros are available
+// before any headers. These are needed by CUDA toolkit and libcudacxx.
+typedef __SIZE_TYPE__ size_t;
+typedef __PTRDIFF_TYPE__ ptrdiff_t;
+#ifndef NULL
+#define NULL nullptr
+#endif
+
+// Freestanding memcpy/memset — needed by libcudacxx's ptx_helper_functions.h
+// which is pulled in transitively by cuda/std/utility.
+extern "C" {
+inline void* memcpy(void* __d, const void* __s, size_t __n) { return __builtin_memcpy(__d, __s, __n); }
+inline void* memset(void* __d, int __c, size_t __n) { return __builtin_memset(__d, __c, __n); }
+inline int memcmp(const void* __a, const void* __b, size_t __n) { return __builtin_memcmp(__a, __b, __n); }
+inline void* memmove(void* __d, const void* __s, size_t __n) { return __builtin_memmove(__d, __s, __n); }
+}
+
+
 // Define __CUDACC__ early as libstdc++ standard headers with GNU extensions
 // enabled depend on it to avoid using __float128, which is unsupported in
 // CUDA.
@@ -106,13 +124,6 @@
 #define __DEVICE_FUNCTIONS_DECLS_H__
 
 #undef __CUDACC__
-// CLANGJIT: Ensure basic types are defined before any CUDA headers
-typedef __SIZE_TYPE__ size_t;
-typedef __PTRDIFF_TYPE__ ptrdiff_t;
-
-#ifndef NULL
-#define NULL nullptr
-#endif
 
 // CLANGJIT: Stub includes (if needed) should go after CUDA headers define
 // vector types
@@ -130,23 +141,11 @@ typedef __PTRDIFF_TYPE__ ptrdiff_t;
 #include "driver_types.h"
 #include "host_config.h"
 
-// Temporarily replace "nv_weak" with weak, so __attribute__((nv_weak)) in
-// cuda_device_runtime_api.h ends up being __attribute__((weak)) which is the
-// functional equivalent of what we need.
-#pragma push_macro("nv_weak")
-#define nv_weak weak
-#undef __CUDABE__
-#undef __CUDA_LIBDEVICE__
-#define __CUDACC__
-#include "cuda_runtime.h"
 
-#pragma pop_macro("nv_weak")
-#undef __CUDACC__
-#define __CUDABE__
-
-// CLANGJIT: Address space query intrinsics needed by libcudacxx
-// These must be declared before any CCCL headers that use them
-// Device implementations use NVVM builtins, host stubs just return false
+// CLANGJIT: Address space query intrinsics needed by libcudacxx.
+// Must be defined BEFORE cuda_runtime.h because libcudacxx headers
+// (e.g. address_space.h) that reference these get pulled in transitively.
+// Device implementations use NVVM builtins, host stubs just return false.
 #ifdef __CUDA_ARCH__
 __device__ inline bool __isGlobal(const void* __ptr) {
     return __nvvm_isspacep_global(__ptr);
@@ -196,6 +195,21 @@ inline unsigned long long __cvta_generic_to_global(const void*) { return 0; }
 inline void* __cvta_shared_to_generic(unsigned) { return nullptr; }
 inline void* __cvta_global_to_generic(unsigned long long) { return nullptr; }
 #endif
+
+// Temporarily replace "nv_weak" with weak, so __attribute__((nv_weak)) in
+// cuda_device_runtime_api.h ends up being __attribute__((weak)) which is the
+// functional equivalent of what we need.
+#pragma push_macro("nv_weak")
+#define nv_weak weak
+#undef __CUDABE__
+#undef __CUDA_LIBDEVICE__
+#define __CUDACC__
+#include "cuda_runtime.h"
+
+#pragma pop_macro("nv_weak")
+#undef __CUDACC__
+#define __CUDABE__
+
 
 // CUDA headers use __nvvm_memcpy and __nvvm_memset which Clang does
 // not have at the moment. Emulate them with a builtin memcpy/memset.

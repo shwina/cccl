@@ -1,7 +1,8 @@
-// Minimal functional stub for CUDA JIT compilation
 #ifndef _CLANGJIT_FUNCTIONAL
 #define _CLANGJIT_FUNCTIONAL
-
-// Empty stub - extended lambdas not needed for basic JIT compilation
-
-#endif // _CLANGJIT_FUNCTIONAL
+#pragma push_macro("__CUDA_ARCH__")
+#undef __CUDA_ARCH__
+#include <cuda/std/functional>
+#pragma pop_macro("__CUDA_ARCH__")
+namespace std { using namespace cuda::std; }
+#endif

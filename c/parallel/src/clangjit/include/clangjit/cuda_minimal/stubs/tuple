@@ -1,34 +1,8 @@
-// Minimal tuple stub for CUDA JIT compilation
-// Provides tuple_size and tuple_element for structured bindings support
 #ifndef _CLANGJIT_TUPLE
 #define _CLANGJIT_TUPLE
-
-#include "cstddef"
-
-namespace std {
-
-// Forward declaration of tuple_size
-template<class T>
-struct tuple_size;
-
-// Forward declaration of tuple_element
-template<size_t I, class T>
-struct tuple_element;
-
-// Helper for tuple_element_t
-template<size_t I, class T>
-using tuple_element_t = typename tuple_element<I, T>::type;
-
-// Const specialization
-template<class T>
-struct tuple_size<const T> : tuple_size<T> {};
-
-template<class T>
-struct tuple_size<volatile T> : tuple_size<T> {};
-
-template<class T>
-struct tuple_size<const volatile T> : tuple_size<T> {};
-
-} // namespace std
-
-#endif // _CLANGJIT_TUPLE
+#pragma push_macro("__CUDA_ARCH__")
+#undef __CUDA_ARCH__
+#include <cuda/std/tuple>
+#pragma pop_macro("__CUDA_ARCH__")
+namespace std { using namespace cuda::std; }
+#endif

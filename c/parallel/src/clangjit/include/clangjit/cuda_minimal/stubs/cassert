@@ -1,7 +1,8 @@
-// Minimal <cassert> stub for CCCL freestanding mode
-#ifndef _CLANGJIT_CASSERT_STUB
-#define _CLANGJIT_CASSERT_STUB
-
-#include <assert.h>
-
-#endif // _CLANGJIT_CASSERT_STUB
+#ifndef _CLANGJIT_CASSERT
+#define _CLANGJIT_CASSERT
+#pragma push_macro("__CUDA_ARCH__")
+#undef __CUDA_ARCH__
+#include <cuda/std/cassert>
+#pragma pop_macro("__CUDA_ARCH__")
+namespace std { using namespace cuda::std; }
+#endif
