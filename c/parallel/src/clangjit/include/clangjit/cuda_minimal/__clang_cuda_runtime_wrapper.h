@@ -1,6 +1,7 @@
 /*===---- Clangjit preamble + real LLVM wrapper ----------------------------===*/
 #ifndef __CLANGJIT_CUDA_RUNTIME_PREAMBLE_H__
 #define __CLANGJIT_CUDA_RUNTIME_PREAMBLE_H__
+#pragma clang system_header
 #if defined(__CUDA__) && defined(__clang__)
 
 #define _CCCL_ENABLE_FREESTANDING 1
