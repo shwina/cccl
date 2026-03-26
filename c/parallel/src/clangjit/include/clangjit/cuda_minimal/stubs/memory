@@ -1,17 +1,5 @@
-// Minimal <memory> stub for CCCL freestanding mode
-#ifndef _CLANGJIT_MEMORY_STUB
-#define _CLANGJIT_MEMORY_STUB
-
-namespace std {
-
-template <typename T>
-T* addressof(T& arg) noexcept {
-    return __builtin_addressof(arg);
-}
-
-template <typename T>
-const T* addressof(const T&&) = delete;
-
-} // namespace std
-
-#endif // _CLANGJIT_MEMORY_STUB
+#ifndef _CLANGJIT_MEMORY
+#define _CLANGJIT_MEMORY
+#include <cuda/std/memory>
+namespace std { using namespace cuda::std; }
+#endif

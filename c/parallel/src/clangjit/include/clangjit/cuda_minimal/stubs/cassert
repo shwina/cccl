@@ -1,7 +1,4 @@
-// Minimal <cassert> stub for CCCL freestanding mode
-#ifndef _CLANGJIT_CASSERT_STUB
-#define _CLANGJIT_CASSERT_STUB
-
-#include <assert.h>
-
-#endif // _CLANGJIT_CASSERT_STUB
+#ifndef _CLANGJIT_CASSERT
+#define _CLANGJIT_CASSERT
+#include <cuda/std/cassert>
+#endif

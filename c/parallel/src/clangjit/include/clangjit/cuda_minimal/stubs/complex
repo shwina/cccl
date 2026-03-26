@@ -1,18 +1,5 @@
-// Minimal <complex> stub for CCCL freestanding mode
-#ifndef _CLANGJIT_COMPLEX_STUB
-#define _CLANGJIT_COMPLEX_STUB
-
-namespace std {
-
-template <typename T>
-class complex {
-    T re_, im_;
-public:
-    constexpr complex(T re = T(), T im = T()) : re_(re), im_(im) {}
-    constexpr T real() const { return re_; }
-    constexpr T imag() const { return im_; }
-};
-
-} // namespace std
-
-#endif // _CLANGJIT_COMPLEX_STUB
+#ifndef _CLANGJIT_COMPLEX
+#define _CLANGJIT_COMPLEX
+#include <cuda/std/complex>
+namespace std { using cuda::std::complex; }
+#endif
