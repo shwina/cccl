@@ -94,6 +94,7 @@ if(CUDAToolkit_FOUND)
   cmake_path(GET CUDAToolkit_BIN_DIR PARENT_PATH CUDA_TOOLKIT_ROOT_FROM_CMAKE)
   target_compile_definitions(clangjit_lib PRIVATE
     CUDA_TOOLKIT_PATH="${CUDA_TOOLKIT_ROOT_FROM_CMAKE}"
+    CUDA_SDK_VERSION="${CUDAToolkit_VERSION_MAJOR}.0"
   )
 endif()
 

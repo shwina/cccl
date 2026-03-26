@@ -117,7 +117,7 @@ public:
     arg_strings.push_back("-mlink-builtin-bitcode");
     arg_strings.push_back(config.cuda_toolkit_path +
                           "/nvvm/libdevice/libdevice.10.bc");
-    arg_strings.push_back("-target-sdk-version=12.8");
+    arg_strings.push_back("-target-sdk-version=" CUDA_SDK_VERSION);
     arg_strings.push_back("-target-cpu");
     arg_strings.push_back("sm_" + std::to_string(config.sm_version));
     arg_strings.push_back("-target-feature");
@@ -373,7 +373,7 @@ public:
     arg_strings.push_back("-mlink-builtin-bitcode");
     arg_strings.push_back(config.cuda_toolkit_path +
                           "/nvvm/libdevice/libdevice.10.bc");
-    arg_strings.push_back("-target-sdk-version=12.8");
+    arg_strings.push_back("-target-sdk-version=" CUDA_SDK_VERSION);
     arg_strings.push_back("-target-cpu");
     arg_strings.push_back("sm_" + std::to_string(config.sm_version));
     arg_strings.push_back("-target-feature");
@@ -491,7 +491,7 @@ public:
 #endif
     arg_strings.push_back("-aux-triple");
     arg_strings.push_back("nvptx64-nvidia-cuda");
-    arg_strings.push_back("-target-sdk-version=12.8");
+    arg_strings.push_back("-target-sdk-version=" CUDA_SDK_VERSION);
     arg_strings.push_back("-emit-obj");
     arg_strings.push_back("-target-cpu");
     arg_strings.push_back("x86-64");
