@@ -1,22 +1,5 @@
 #ifndef _CLANGJIT_LIMITS
 #define _CLANGJIT_LIMITS
-#include "climits"
-#include "cfloat"
-namespace std {
-template<class T> class numeric_limits {
-public:
-  static constexpr bool is_specialized = false;
-  static constexpr T min() noexcept { return T(); }
-  static constexpr T max() noexcept { return T(); }
-  static constexpr T lowest() noexcept { return T(); }
-  static constexpr int digits = 0;
-  static constexpr int digits10 = 0;
-  static constexpr bool is_signed = false;
-  static constexpr bool is_integer = false;
-  static constexpr bool is_exact = false;
-  static constexpr bool has_infinity = false;
-  static constexpr T infinity() noexcept { return T(); }
-  static constexpr T epsilon() noexcept { return T(); }
-};
-}
+#include <cuda/std/limits>
+namespace std { using cuda::std::numeric_limits; }
 #endif
