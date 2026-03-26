@@ -153,6 +153,11 @@ public:
     arg_strings.push_back("-DNDEBUG");
     arg_strings.push_back("-D_CUB_DISABLE_CMATH");
     arg_strings.push_back("-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK");
+    arg_strings.push_back("-D_CCCL_ENABLE_FREESTANDING=1");
+    arg_strings.push_back("-DCCCL_DISABLE_FP16_SUPPORT=1");
+    arg_strings.push_back("-DCCCL_DISABLE_BF16_SUPPORT=1");
+    arg_strings.push_back("-DCCCL_DISABLE_NVTX=1");
+    arg_strings.push_back("-DCCCL_DISABLE_EXCEPTIONS=1");
 
     std::vector<std::string> bitcode_files_to_link =
         config.device_bitcode_files;
@@ -404,6 +409,11 @@ public:
     arg_strings.push_back("-DNDEBUG");
     arg_strings.push_back("-D_CUB_DISABLE_CMATH");
     arg_strings.push_back("-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK");
+    arg_strings.push_back("-D_CCCL_ENABLE_FREESTANDING=1");
+    arg_strings.push_back("-DCCCL_DISABLE_FP16_SUPPORT=1");
+    arg_strings.push_back("-DCCCL_DISABLE_BF16_SUPPORT=1");
+    arg_strings.push_back("-DCCCL_DISABLE_NVTX=1");
+    arg_strings.push_back("-DCCCL_DISABLE_EXCEPTIONS=1");
     arg_strings.push_back("-DCCCL_DISABLE_FP16_SUPPORT=1");
     arg_strings.push_back("-DCCCL_DISABLE_BF16_SUPPORT=1");
     arg_strings.push_back("-fdeprecated-macro");
@@ -531,6 +541,11 @@ public:
     arg_strings.push_back("-DNDEBUG");
     arg_strings.push_back("-D_CUB_DISABLE_CMATH");
     arg_strings.push_back("-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK");
+    arg_strings.push_back("-D_CCCL_ENABLE_FREESTANDING=1");
+    arg_strings.push_back("-DCCCL_DISABLE_FP16_SUPPORT=1");
+    arg_strings.push_back("-DCCCL_DISABLE_BF16_SUPPORT=1");
+    arg_strings.push_back("-DCCCL_DISABLE_NVTX=1");
+    arg_strings.push_back("-DCCCL_DISABLE_EXCEPTIONS=1");
 
     for (const auto &[macro_name, macro_value] : config.macro_definitions) {
       if (macro_value.empty()) {
