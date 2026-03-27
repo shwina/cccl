@@ -42,7 +42,7 @@
 
 /// In device code, _CCCL_PTX_ARCH() expands to the PTX version for which we are compiling.
 /// In host code, _CCCL_PTX_ARCH()'s value is implementation defined.
-#if !defined(__CUDA_ARCH__)
+#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ == 9999
 #  define _CCCL_PTX_ARCH() 0
 #else
 #  define _CCCL_PTX_ARCH() __CUDA_ARCH__

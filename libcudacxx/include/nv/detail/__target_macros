@@ -129,14 +129,14 @@
 #  define _NV_TARGET_VAL_SM_120 1200
 #  define _NV_TARGET_VAL_SM_121 1210
 
-#  if defined(__CUDA_ARCH__)
+#  if defined(__CUDA_ARCH__) && __CUDA_ARCH__ != 9999
 #    define _NV_TARGET_VAL                __CUDA_ARCH__
 #    define NV_TARGET_MINIMUM_SM_SELECTOR _NV_CONCAT_EVAL(_NV_TARGET_ARCH_TO_SELECTOR_, __CUDA_ARCH__)
 #    define NV_TARGET_MINIMUM_SM_INTEGER  _NV_CONCAT_EVAL(_NV_TARGET_ARCH_TO_SM_, __CUDA_ARCH__)
 #    define __CUDA_MINIMUM_ARCH__         __CUDA_ARCH__
 #  endif
 
-#  if defined(__CUDA_ARCH__)
+#  if defined(__CUDA_ARCH__) && __CUDA_ARCH__ != 9999
 #    define _NV_TARGET_IS_HOST   0
 #    define _NV_TARGET_IS_DEVICE 1
 #  else
