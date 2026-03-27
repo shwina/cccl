@@ -1,5 +1,0 @@
-#ifndef _CLANGJIT_ITERATOR
-#define _CLANGJIT_ITERATOR
-#include <cuda/std/iterator>
-namespace std { using namespace cuda::std; }
-#endif

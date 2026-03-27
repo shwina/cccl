@@ -1,4 +1,0 @@
-#ifndef _CLANGJIT_CASSERT
-#define _CLANGJIT_CASSERT
-#include <cuda/std/cassert>
-#endif

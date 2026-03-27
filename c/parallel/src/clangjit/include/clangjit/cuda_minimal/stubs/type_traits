@@ -1,5 +1,0 @@
-#ifndef _CLANGJIT_TYPE_TRAITS
-#define _CLANGJIT_TYPE_TRAITS
-#include <cuda/std/type_traits>
-namespace std { using namespace cuda::std; }
-#endif

@@ -129,6 +129,9 @@ public:
                           "/clangjit/cuda_minimal/stubs");
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(
+        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(
         std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
@@ -390,6 +393,9 @@ public:
                           "/clangjit/cuda_minimal/stubs");
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(
+        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(
         std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
@@ -516,6 +522,9 @@ public:
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(config.clangjit_include_path +
                           "/clangjit/cuda_minimal/stubs");
+    arg_strings.push_back("-internal-isystem");
+    arg_strings.push_back(
+        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(
         std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");

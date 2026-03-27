@@ -1,5 +1,0 @@
-#ifndef _CLANGJIT_COMPLEX
-#define _CLANGJIT_COMPLEX
-#include <cuda/std/complex>
-namespace std { using cuda::std::complex; }
-#endif

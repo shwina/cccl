@@ -1,5 +1,0 @@
-#ifndef _CLANGJIT_CFLOAT
-#define _CLANGJIT_CFLOAT
-#include <cuda/std/cfloat>
-namespace std { using namespace cuda::std; }
-#endif

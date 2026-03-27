@@ -1,5 +1,0 @@
-#ifndef _CLANGJIT_LIMITS
-#define _CLANGJIT_LIMITS
-#include <cuda/std/limits>
-namespace std { using cuda::std::numeric_limits; }
-#endif

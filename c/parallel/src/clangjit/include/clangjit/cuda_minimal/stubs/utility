@@ -1,5 +1,0 @@
-#ifndef _CLANGJIT_UTILITY
-#define _CLANGJIT_UTILITY
-#include <cuda/std/utility>
-namespace std { using namespace cuda::std; }
-#endif

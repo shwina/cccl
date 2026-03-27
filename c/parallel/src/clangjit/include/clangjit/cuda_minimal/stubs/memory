@@ -1,5 +1,0 @@
-#ifndef _CLANGJIT_MEMORY
-#define _CLANGJIT_MEMORY
-#include <cuda/std/memory>
-namespace std { using namespace cuda::std; }
-#endif
