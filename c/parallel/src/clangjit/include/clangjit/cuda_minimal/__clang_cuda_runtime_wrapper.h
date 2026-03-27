@@ -20,8 +20,7 @@ __attribute__((device)) bool __nv_fp128_isnan(__float128);
 __attribute__((device)) __float128 __nv_fp128_fmax(__float128, __float128);
 __attribute__((device)) __float128 __nv_fp128_fmin(__float128, __float128);
 
-// Bridge cuda::std:: into std:: — must happen before the wrapper
-// so that cuda_runtime.h's #include <utility> → std::forward works.
+// Bridge cuda::std:: into std::
 namespace cuda { namespace std {} }
 namespace std { using namespace cuda::std; }
 
