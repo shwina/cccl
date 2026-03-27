@@ -1,68 +1,17 @@
-// Minimal <new> stub for CUDA JIT compilation
 #ifndef _CLANGJIT_NEW
 #define _CLANGJIT_NEW
-
 #include "cstddef"
 
-#if defined(__CUDACC__) || defined(__CUDA__)
-#define _CLANGJIT_HD __host__ __device__
-#else
-#define _CLANGJIT_HD
-#endif
-
 namespace std {
-
-// nothrow_t for nothrow new
-struct nothrow_t {
-    explicit nothrow_t() = default;
-};
+struct nothrow_t { explicit nothrow_t() = default; };
 extern const nothrow_t nothrow;
-
-// align_val_t for aligned new (C++17)
 enum class align_val_t : size_t {};
-
-// bad_alloc exception - minimal definition
-class bad_alloc {
-public:
-    bad_alloc() noexcept = default;
-    bad_alloc(const bad_alloc&) noexcept = default;
-    bad_alloc& operator=(const bad_alloc&) noexcept = default;
-    virtual ~bad_alloc() noexcept = default;
-    virtual const char* what() const noexcept { return "bad_alloc"; }
-};
-
-class bad_array_new_length : public bad_alloc {
-public:
-    bad_array_new_length() noexcept = default;
-    virtual const char* what() const noexcept { return "bad_array_new_length"; }
-};
-
-// launder (C++17)
-template<class T>
-_CLANGJIT_HD constexpr T* launder(T* p) noexcept {
-    return __builtin_launder(p);
 }
 
-// destroy_at (C++17)
-template<class T>
-_CLANGJIT_HD constexpr void destroy_at(T* p) {
-    p->~T();
-}
+// Placement new
+inline void* operator new(std::size_t, void* p) noexcept { return p; }
+inline void* operator new[](std::size_t, void* p) noexcept { return p; }
+inline void operator delete(void*, void*) noexcept {}
+inline void operator delete[](void*, void*) noexcept {}
 
-// Hardware interference sizes (C++17)
-#ifdef __cpp_lib_hardware_interference_size
-inline constexpr size_t hardware_destructive_interference_size = 64;
-inline constexpr size_t hardware_constructive_interference_size = 64;
 #endif
-
-} // namespace std
-
-// Placement new operators - these are compiler builtins but need declarations
-_CLANGJIT_HD inline void* operator new(std::size_t, void* p) noexcept { return p; }
-_CLANGJIT_HD inline void* operator new[](std::size_t, void* p) noexcept { return p; }
-_CLANGJIT_HD inline void operator delete(void*, void*) noexcept {}
-_CLANGJIT_HD inline void operator delete[](void*, void*) noexcept {}
-
-#undef _CLANGJIT_HD
-
-#endif // _CLANGJIT_NEW

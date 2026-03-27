@@ -4,25 +4,9 @@
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
 #define RAND_MAX 2147483647
-namespace std {
-struct div_t { int quot; int rem; };
-struct ldiv_t { long quot; long rem; };
-struct lldiv_t { long long quot; long long rem; };
-// abs/labs/llabs provided by __clang_cuda_math.h
-inline constexpr div_t div(int n, int d) noexcept { return {n/d, n%d}; }
-inline constexpr ldiv_t div(long n, long d) noexcept { return {n/d, n%d}; }
-inline constexpr lldiv_t div(long long n, long long d) noexcept { return {n/d, n%d}; }
-inline constexpr ldiv_t ldiv(long n, long d) noexcept { return div(n,d); }
-inline constexpr lldiv_t lldiv(long long n, long long d) noexcept { return div(n,d); }
-} // namespace std
-using std::div_t; using std::ldiv_t; using std::lldiv_t;
-using std::div; using std::ldiv; using std::lldiv;
 extern "C" {
-int atoi(const char*); long atol(const char*); long long atoll(const char*);
-double atof(const char*);
 void* malloc(size_t); void* calloc(size_t, size_t);
 void* realloc(void*, size_t); void free(void*);
-void abort(void); void exit(int); void _Exit(int); void quick_exit(int);
-int atexit(void (*)(void)); int at_quick_exit(void (*)(void));
+void abort(void); void exit(int); void _Exit(int);
 }
 #endif
