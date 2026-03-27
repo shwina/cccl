@@ -1,103 +1,28 @@
-// Minimal cstdlib stub for CUDA JIT compilation
 #ifndef _CLANGJIT_CSTDLIB
 #define _CLANGJIT_CSTDLIB
-
 #include "cstddef"
-
-// Exit codes
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
-
-// Maximum value returned by rand()
 #define RAND_MAX 2147483647
-
 namespace std {
-
-// Division types
-struct div_t {
-    int quot;
-    int rem;
-};
-
-struct ldiv_t {
-    long quot;
-    long rem;
-};
-
-struct lldiv_t {
-    long long quot;
-    long long rem;
-};
-
-// div functions
-inline constexpr div_t div(int numer, int denom) noexcept {
-    return {numer / denom, numer % denom};
-}
-
-inline constexpr ldiv_t div(long numer, long denom) noexcept {
-    return {numer / denom, numer % denom};
-}
-
-inline constexpr lldiv_t div(long long numer, long long denom) noexcept {
-    return {numer / denom, numer % denom};
-}
-
-inline constexpr ldiv_t ldiv(long numer, long denom) noexcept {
-    return div(numer, denom);
-}
-
-inline constexpr lldiv_t lldiv(long long numer, long long denom) noexcept {
-    return div(numer, denom);
-}
-
+struct div_t { int quot; int rem; };
+struct ldiv_t { long quot; long rem; };
+struct lldiv_t { long long quot; long long rem; };
+// abs/labs/llabs provided by __clang_cuda_math.h
+inline constexpr div_t div(int n, int d) noexcept { return {n/d, n%d}; }
+inline constexpr ldiv_t div(long n, long d) noexcept { return {n/d, n%d}; }
+inline constexpr lldiv_t div(long long n, long long d) noexcept { return {n/d, n%d}; }
+inline constexpr ldiv_t ldiv(long n, long d) noexcept { return div(n,d); }
+inline constexpr lldiv_t lldiv(long long n, long long d) noexcept { return div(n,d); }
 } // namespace std
-
-// C-style declarations (global namespace)
-using std::div_t;
-using std::ldiv_t;
-using std::lldiv_t;
-using std::div;
-using std::ldiv;
-using std::lldiv;
-
-// Host-only functions - just declarations
+using std::div_t; using std::ldiv_t; using std::lldiv_t;
+using std::div; using std::ldiv; using std::lldiv;
 extern "C" {
-int atoi(const char* nptr);
-long atol(const char* nptr);
-long long atoll(const char* nptr);
-double atof(const char* nptr);
-double strtod(const char* nptr, char** endptr);
-float strtof(const char* nptr, char** endptr);
-long double strtold(const char* nptr, char** endptr);
-long strtol(const char* nptr, char** endptr, int base);
-long long strtoll(const char* nptr, char** endptr, int base);
-unsigned long strtoul(const char* nptr, char** endptr, int base);
-unsigned long long strtoull(const char* nptr, char** endptr, int base);
-int rand(void);
-void srand(unsigned int seed);
-void* malloc(size_t size);
-void* calloc(size_t nmemb, size_t size);
-void* realloc(void* ptr, size_t size);
-void free(void* ptr);
-void* aligned_alloc(size_t alignment, size_t size);
-void abort(void);
-void exit(int status);
-void _Exit(int status);
-void quick_exit(int status);
-int atexit(void (*func)(void));
-int at_quick_exit(void (*func)(void));
-char* getenv(const char* name);
-int system(const char* command);
-void* bsearch(const void* key, const void* base, size_t nmemb, size_t size,
-              int (*compar)(const void*, const void*));
-void qsort(void* base, size_t nmemb, size_t size,
-           int (*compar)(const void*, const void*));
-// Multibyte/wide character functions
-int mblen(const char* s, size_t n);
-size_t mbstowcs(wchar_t* pwcs, const char* s, size_t n);
-int mbtowc(wchar_t* pwc, const char* s, size_t n);
-size_t wcstombs(char* s, const wchar_t* pwcs, size_t n);
-int wctomb(char* s, wchar_t wchar);
+int atoi(const char*); long atol(const char*); long long atoll(const char*);
+double atof(const char*);
+void* malloc(size_t); void* calloc(size_t, size_t);
+void* realloc(void*, size_t); void free(void*);
+void abort(void); void exit(int); void _Exit(int); void quick_exit(int);
+int atexit(void (*)(void)); int at_quick_exit(void (*)(void));
 }
-
-#endif // _CLANGJIT_CSTDLIB
+#endif
