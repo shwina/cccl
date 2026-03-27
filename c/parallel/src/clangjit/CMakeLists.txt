@@ -192,3 +192,12 @@ if(NOT MSVC)
   target_compile_options(example_cub_reduce_custom_op PRIVATE -fno-rtti)
 endif()
 set_target_properties(example_cub_reduce_custom_op PROPERTIES CXX_STANDARD 20)
+
+add_executable(example_cub_adjacent_difference
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/cub_adjacent_difference.cpp
+)
+target_link_libraries(example_cub_adjacent_difference clangjit_lib)
+if(NOT MSVC)
+  target_compile_options(example_cub_adjacent_difference PRIVATE -fno-rtti)
+endif()
+set_target_properties(example_cub_adjacent_difference PROPERTIES CXX_STANDARD 20)

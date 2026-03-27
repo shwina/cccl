@@ -19,7 +19,7 @@
 
 #include <cuda/__device/arch_id.h>
 
-#if !_CCCL_COMPILER(NVRTC)
+#if _CCCL_HOSTED()
 #  include <ostream>
 #endif
 
@@ -49,7 +49,7 @@ struct adjacent_difference_policy
     return !(lhs == rhs);
   }
 
-#if !_CCCL_COMPILER(NVRTC)
+#if !_CCCL_COMPILER(NVRTC) && !_CCCL_FREESTANDING()
   friend ::std::ostream& operator<<(::std::ostream& os, const adjacent_difference_policy& p)
   {
     return os << "adjacent_difference_policy { .block_threads = " << p.block_threads
