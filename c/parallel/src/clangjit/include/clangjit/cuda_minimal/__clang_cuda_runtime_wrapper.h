@@ -1,10 +1,48 @@
-/*===---- Clangjit preamble + real LLVM wrapper ----------------------------===*/
-#ifndef __CLANGJIT_CUDA_RUNTIME_PREAMBLE_H__
-#define __CLANGJIT_CUDA_RUNTIME_PREAMBLE_H__
+/*===---- ClangJIT CUDA runtime wrapper - replaces clang's wrapper ----------===
+ *
+ * This is a self-contained replacement for clang's __clang_cuda_runtime_wrapper.h.
+ * Instead of #include_next-ing the real wrapper (which has fragile ordering
+ * dependencies on system headers and CUDA toolkit version-specific branches),
+ * we directly include only the clang-provided CUDA helper headers we need and
+ * pull in the CUDA toolkit headers with explicit preprocessor guards.
+ *
+ * Assumptions:
+ *   - CUDA >= 9.0  (no legacy code paths)
+ *   - Clang CUDA compilation (__CUDA__ && __clang__)
+ *   - Freestanding: all standard headers are stubs or from libcudacxx
+ *   - cuda::std is bridged into std via using-directive
+ *===-----------------------------------------------------------------------===*/
+#ifndef __CLANG_CUDA_RUNTIME_WRAPPER_H__
+#define __CLANG_CUDA_RUNTIME_WRAPPER_H__
 #pragma clang system_header
+
 #if defined(__CUDA__) && defined(__clang__)
 
-// Forward declarations for CUDA intrinsics (defined later in the wrapper)
+// ============================================================================
+// Phase 1: Forward-declare device math overloads before any <cmath> inclusion
+// ============================================================================
+// This prevents constexpr std library math functions from becoming implicitly
+// host+device, which would block our __device__ overloads later.
+#include <__clang_cuda_math_forward_declares.h>
+
+// ============================================================================
+// Phase 2: Pull in minimal standard headers (satisfied by our stubs)
+// ============================================================================
+// Define __CUDACC__ temporarily so that headers (e.g. libstdc++ with GNU
+// extensions) avoid __float128, which is unsupported in CUDA.
+#define __CUDACC__
+#include <climits>
+#include <cmath>
+#include <cstdlib>
+#include <stdlib.h>
+#include <string.h>
+#undef __CUDACC__
+
+// ============================================================================
+// Phase 3: Intrinsic forward declarations needed by CCCL headers
+// ============================================================================
+// These must appear before any CUDA toolkit / CCCL headers that use them
+// (e.g. cuda/__memory/address_space.h, cuda/__ptx/ptx_helper_functions.h).
 #define __FWD_DEVICE static __attribute__((device)) __attribute__((always_inline))
 __FWD_DEVICE __attribute__((const)) unsigned int __isGlobal(const void *);
 __FWD_DEVICE __attribute__((const)) unsigned int __isShared(const void *);
@@ -20,13 +58,316 @@ __attribute__((device)) bool __nv_fp128_isnan(__float128);
 __attribute__((device)) __float128 __nv_fp128_fmax(__float128, __float128);
 __attribute__((device)) __float128 __nv_fp128_fmin(__float128, __float128);
 
-// Bridge cuda::std:: into std::
+// ============================================================================
+// Phase 4: Bridge cuda::std into std
+// ============================================================================
 namespace cuda { namespace std {} }
 namespace std { using namespace cuda::std; }
 
+// ============================================================================
+// Phase 5: CUDA toolkit headers
+// ============================================================================
+// Save macros that CUDA headers will clobber.
+#pragma push_macro("__THROW")
+#pragma push_macro("__CUDA_ARCH__")
+
+#include "cuda.h"
+#if !defined(CUDA_VERSION)
+#error "cuda.h did not define CUDA_VERSION"
+#elif CUDA_VERSION < 9000
+#error "Unsupported CUDA version (need >= 9.0)!"
+#endif
+
+#pragma push_macro("__CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__")
+#define __CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__
+
+// Make device functions available during host compilation.
+#ifndef __CUDA_ARCH__
+#define __CUDA_ARCH__ 9999
+#endif
+
+// ---- Builtin variables (threadIdx, blockIdx, etc.) ----
+#include "__clang_cuda_builtin_vars.h"
+#define __DEVICE_LAUNCH_PARAMETERS_H__
+
+// Guard out CUDA's declaration-only headers; clang provides its own.
+#define __DEVICE_FUNCTIONS_H__
+#define __MATH_FUNCTIONS_H__
 #define __MATH_FUNCTIONS_HPP__
-#include_next <__clang_cuda_runtime_wrapper.h>
+#define __COMMON_FUNCTIONS_H__
+#define __DEVICE_FUNCTIONS_DECLS_H__
+
+// ---- CUDA runtime types (cudaError_t, dim3, cudaStream_t, etc.) ----
+#define __CUDACC__
+#define __CUDA_LIBDEVICE__
+#include "host_defines.h"
+#undef __CUDACC__
+#include "driver_types.h"
+#include "host_config.h"
+
+// nv_weak → weak so __attribute__((nv_weak)) works as __attribute__((weak))
+#pragma push_macro("nv_weak")
+#define nv_weak weak
+#undef __CUDA_LIBDEVICE__
+#define __CUDACC__
+#include "cuda_runtime.h"
+#pragma pop_macro("nv_weak")
+#undef __CUDACC__
+#define __CUDABE__
+
+// Clang does not have __nvvm_memcpy/__nvvm_memset; emulate with builtins.
+#define __nvvm_memcpy(s, d, n, a) __builtin_memcpy(s, d, n)
+#define __nvvm_memset(d, c, n, a) __builtin_memset(d, c, n)
+
+#include "crt/host_runtime.h"
+
+// device_runtime.h defines __cxa_* macros that conflict with cxxabi.h.
+#undef __cxa_vec_ctor
+#undef __cxa_vec_cctor
+#undef __cxa_vec_dtor
+#undef __cxa_vec_new
+#undef __cxa_vec_new2
+#undef __cxa_vec_new3
+#undef __cxa_vec_delete2
+#undef __cxa_vec_delete
+#undef __cxa_vec_delete3
+#undef __cxa_pure_virtual
+
+// ============================================================================
+// Phase 5 (cont.): Clang's device-side function implementations
+// ============================================================================
+#include <__clang_cuda_libdevice_declares.h>
+#include <__clang_cuda_device_functions.h>
+#include <__clang_cuda_math.h>
+
+// __THROW was redefined to empty by CUDA headers; keep it that way for
+// subsequent CUDA includes.
+#undef __THROW
+#define __THROW
+
+// ============================================================================
+// Phase 6: Device-side function definitions from CUDA toolkit .hpp files
+// ============================================================================
+// Poison __host__ to ensure none of these definitions get host attributes.
+#pragma push_macro("__host__")
+#define __host__ UNEXPECTED_HOST_ATTRIBUTE
+
+// Redefine __forceinline__ to include __device__.
+#pragma push_macro("__forceinline__")
+#define __forceinline__ __device__ __inline__ __attribute__((always_inline))
+
+// Math functions: use fast or accurate variants based on compiler flag.
+#pragma push_macro("__USE_FAST_MATH__")
+#if defined(__CLANG_GPU_APPROX_TRANSCENDENTALS__)
+#define __USE_FAST_MATH__ 1
+#endif
+#include "crt/math_functions.hpp"
+#pragma pop_macro("__USE_FAST_MATH__")
+
+#pragma pop_macro("__forceinline__")
+
+// Pull in host-only overloads (needs __MATH_FUNCTIONS_HPP__ undef'd and
+// __CUDABE__ undef'd).
+#undef __MATH_FUNCTIONS_HPP__
+#undef __CUDABE__
+
+// Provide a few float overloads that are hard to extract from CUDA headers.
+static inline float rsqrt(float __a) { return rsqrtf(__a); }
+static inline float rcbrt(float __a) { return rcbrtf(__a); }
+static inline float sinpi(float __a) { return sinpif(__a); }
+static inline float cospi(float __a) { return cospif(__a); }
+static inline void sincospi(float __a, float *__b, float *__c) {
+  return sincospif(__a, __b, __c);
+}
+static inline float erfcinv(float __a) { return erfcinvf(__a); }
+static inline float normcdfinv(float __a) { return normcdfinvf(__a); }
+static inline float normcdf(float __a) { return normcdff(__a); }
+static inline float erfcx(float __a) { return erfcxf(__a); }
+
+// Now re-include device functions with __host__ defined as empty so we get
+// the "other branch" of #if/#else in the .hpp files.
+#define __host__
+#undef __CUDABE__
+#define __CUDACC__
+
+// Atomic function declarations (became builtins in CUDA 9).
+#include "device_atomic_functions.h"
+#undef __DEVICE_FUNCTIONS_HPP__
+#include "device_atomic_functions.hpp"
+#include "crt/device_functions.hpp"
+#include "crt/device_double_functions.hpp"
+#include "sm_20_atomic_functions.hpp"
+
+// SM 2.0 intrinsics define __isGlobal etc. without const attribute.
+// Rename them and provide our own const-correct versions.
+#pragma push_macro("__isGlobal")
+#pragma push_macro("__isShared")
+#pragma push_macro("__isConstant")
+#pragma push_macro("__isLocal")
+#define __isGlobal __ignored_cuda___isGlobal
+#define __isShared __ignored_cuda___isShared
+#define __isConstant __ignored_cuda___isConstant
+#define __isLocal __ignored_cuda___isLocal
+#include "sm_20_intrinsics.hpp"
+#pragma pop_macro("__isGlobal")
+#pragma pop_macro("__isShared")
+#pragma pop_macro("__isConstant")
+#pragma pop_macro("__isLocal")
+
+#pragma push_macro("__DEVICE__")
+#define __DEVICE__ static __device__ __forceinline__ __attribute__((const))
+__DEVICE__ unsigned int __isGlobal(const void *p) {
+  return __nvvm_isspacep_global(p);
+}
+__DEVICE__ unsigned int __isShared(const void *p) {
+  return __nvvm_isspacep_shared(p);
+}
+__DEVICE__ unsigned int __isConstant(const void *p) {
+  return __nvvm_isspacep_const(p);
+}
+__DEVICE__ unsigned int __isLocal(const void *p) {
+  return __nvvm_isspacep_local(p);
+}
+#pragma pop_macro("__DEVICE__")
+
+#include "sm_32_atomic_functions.hpp"
+
+#pragma push_macro("__CUDA_ARCH__")
+#undef __CUDA_ARCH__
+#include "sm_60_atomic_functions.hpp"
+#include "sm_61_intrinsics.hpp"
+#pragma pop_macro("__CUDA_ARCH__")
+
 #undef __MATH_FUNCTIONS_HPP__
 
+// math_functions.hpp ::signbit conflicts with libstdc++ constexpr ::signbit.
+#pragma push_macro("signbit")
+#pragma push_macro("__GNUC__")
+#undef __GNUC__
+#define signbit __ignored_cuda_signbit
+#pragma push_macro("_GLIBCXX_MATH_H")
+#pragma push_macro("_LIBCPP_VERSION")
+#undef _GLIBCXX_MATH_H
+#ifdef _LIBCPP_VERSION
+#define _LIBCPP_VERSION 3700
 #endif
+#include "crt/math_functions.hpp"
+#pragma pop_macro("_GLIBCXX_MATH_H")
+#pragma pop_macro("_LIBCPP_VERSION")
+#pragma pop_macro("__GNUC__")
+#pragma pop_macro("signbit")
+
+#pragma pop_macro("__host__")
+
+// Texture intrinsics (requires C++11).
+#if __cplusplus >= 201103L
+#include <__clang_cuda_texture_intrinsics.h>
+#else
+template <typename T> struct __nv_tex_needs_cxx11 {
+  const static bool value = false;
+};
+template <class T>
+__host__ __device__ void __nv_tex_surf_handler(const char *name, T *ptr,
+                                               cudaTextureObject_t obj,
+                                               float x) {
+  _Static_assert(__nv_tex_needs_cxx11<T>::value,
+                 "Texture support requires C++11");
+}
 #endif
+#include "surface_indirect_functions.h"
+#if CUDA_VERSION < 13000
+#include "texture_fetch_functions.h"
+#endif
+#include "texture_indirect_functions.h"
+
+// ============================================================================
+// Phase 7: Restore saved state
+// ============================================================================
+#pragma pop_macro("__CUDA_ARCH__")
+#pragma pop_macro("__THROW")
+#undef __CUDABE__
+#define __CUDACC__
+
+// ============================================================================
+// Phase 8: Device-side system calls & std wrappers
+// ============================================================================
+extern "C" {
+__device__ int vprintf(const char *, const char *);
+__device__ void free(void *) __attribute((nothrow));
+__device__ void *malloc(size_t) __attribute((nothrow)) __attribute__((malloc));
+__device__ void __assertfail(const char *__message, const char *__file,
+                             unsigned __line, const char *__function,
+                             size_t __charSize);
+__device__ static inline void __assert_fail(const char *__message,
+                                            const char *__file, unsigned __line,
+                                            const char *__function) {
+  __assertfail(__message, __file, __line, __function, sizeof(char));
+}
+__device__ int printf(const char *, ...);
+} // extern "C"
+
+namespace std {
+__device__ static inline void free(void *__ptr) { ::free(__ptr); }
+__device__ static inline void *malloc(size_t __size) {
+  return ::malloc(__size);
+}
+} // namespace std
+
+// ============================================================================
+// Phase 9: Builtin variable conversion operators
+// ============================================================================
+// These need dim3 and uint3 to be fully defined (from vector_types.h, pulled
+// in by driver_types.h above).
+__device__ inline __cuda_builtin_threadIdx_t::operator dim3() const {
+  return dim3(x, y, z);
+}
+__device__ inline __cuda_builtin_threadIdx_t::operator uint3() const {
+  return {x, y, z};
+}
+__device__ inline __cuda_builtin_blockIdx_t::operator dim3() const {
+  return dim3(x, y, z);
+}
+__device__ inline __cuda_builtin_blockIdx_t::operator uint3() const {
+  return {x, y, z};
+}
+__device__ inline __cuda_builtin_blockDim_t::operator dim3() const {
+  return dim3(x, y, z);
+}
+__device__ inline __cuda_builtin_blockDim_t::operator uint3() const {
+  return {x, y, z};
+}
+__device__ inline __cuda_builtin_gridDim_t::operator dim3() const {
+  return dim3(x, y, z);
+}
+__device__ inline __cuda_builtin_gridDim_t::operator uint3() const {
+  return {x, y, z};
+}
+
+// ============================================================================
+// Phase 10: Remaining clang CUDA headers
+// ============================================================================
+#include <__clang_cuda_cmath.h>
+#include <__clang_cuda_intrinsics.h>
+#include <__clang_cuda_complex_builtins.h>
+
+// curand_mtgp32_kernel redefines blockDim/threadIdx with dim3/uint3 types,
+// which is incompatible with our builtins. Force-include it with types
+// redefined to our builtin types.
+#pragma push_macro("dim3")
+#pragma push_macro("uint3")
+#define dim3 __cuda_builtin_blockDim_t
+#define uint3 __cuda_builtin_threadIdx_t
+#include "curand_mtgp32_kernel.h"
+#pragma pop_macro("dim3")
+#pragma pop_macro("uint3")
+#pragma pop_macro("__CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__")
+
+// Kernel launch configuration function.
+#if CUDA_VERSION >= 9020
+extern "C" unsigned __cudaPushCallConfiguration(dim3 gridDim, dim3 blockDim,
+                                                size_t sharedMem = 0,
+                                                void *stream = 0);
+#endif
+
+#endif // __CUDA__ && __clang__
+#endif // __CLANG_CUDA_RUNTIME_WRAPPER_H__
