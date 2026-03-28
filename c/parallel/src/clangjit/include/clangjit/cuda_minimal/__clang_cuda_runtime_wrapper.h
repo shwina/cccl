@@ -154,19 +154,6 @@ namespace std { using namespace cuda::std; }
 #undef __MATH_FUNCTIONS_HPP__
 #undef __CUDABE__
 
-// Float overloads that are hard to extract from CUDA headers.
-static inline float rsqrt(float __a) { return rsqrtf(__a); }
-static inline float rcbrt(float __a) { return rcbrtf(__a); }
-static inline float sinpi(float __a) { return sinpif(__a); }
-static inline float cospi(float __a) { return cospif(__a); }
-static inline void sincospi(float __a, float *__b, float *__c) {
-  return sincospif(__a, __b, __c);
-}
-static inline float erfcinv(float __a) { return erfcinvf(__a); }
-static inline float normcdfinv(float __a) { return normcdfinvf(__a); }
-static inline float normcdf(float __a) { return normcdff(__a); }
-static inline float erfcx(float __a) { return erfcxf(__a); }
-
 // Re-include device functions with __host__ defined as empty to get
 // the "other branch" of #if/#else in the .hpp files.
 #define __host__
