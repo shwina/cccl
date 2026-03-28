@@ -50,6 +50,7 @@
 #include "cuda.h"
 
 // host_defines.h provides __device__, __host__, __forceinline__ macros.
+#define __CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__
 #define __CUDACC__
 #define __CUDA_LIBDEVICE__
 #include "host_defines.h"
