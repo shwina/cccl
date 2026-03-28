@@ -19,24 +19,22 @@
 #  pragma system_header
 #endif // no system header
 
-#ifndef _CUB_DISABLE_CMATH
+#include <cub/agent/agent_reduce.cuh>
+#include <cub/detail/rfa.cuh>
+#include <cub/device/dispatch/dispatch_reduce.cuh>
+#include <cub/grid/grid_even_share.cuh>
+#include <cub/iterator/arg_index_input_iterator.cuh>
+#include <cub/thread/thread_operators.cuh>
+#include <cub/thread/thread_store.cuh>
+#include <cub/util_debug.cuh>
+#include <cub/util_device.cuh>
+#include <cub/util_temporary_storage.cuh>
 
-#  include <cub/agent/agent_reduce.cuh>
-#  include <cub/detail/rfa.cuh>
-#  include <cub/device/dispatch/dispatch_reduce.cuh>
-#  include <cub/grid/grid_even_share.cuh>
-#  include <cub/iterator/arg_index_input_iterator.cuh>
-#  include <cub/thread/thread_operators.cuh>
-#  include <cub/thread/thread_store.cuh>
-#  include <cub/util_debug.cuh>
-#  include <cub/util_device.cuh>
-#  include <cub/util_temporary_storage.cuh>
+#include <thrust/iterator/transform_output_iterator.h>
+#include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 
-#  include <thrust/iterator/transform_output_iterator.h>
-#  include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
-
-#  include <cuda/__cmath/ceil_div.h>
-#  include <cuda/__type_traits/is_floating_point.h>
+#include <cuda/__cmath/ceil_div.h>
+#include <cuda/__type_traits/is_floating_point.h>
 #  include <cuda/std/__algorithm/min.h>
 #  include <cuda/std/__functional/identity.h>
 #  include <cuda/std/__functional/invoke.h>
@@ -479,4 +477,3 @@ struct dispatch_t
 } // namespace detail::rfa
 CUB_NAMESPACE_END
 
-#endif // _CUB_DISABLE_CMATH

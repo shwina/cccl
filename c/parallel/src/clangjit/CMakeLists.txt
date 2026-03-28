@@ -208,6 +208,15 @@ if(NOT MSVC)
 endif()
 set_target_properties(example_cub_reduce PROPERTIES CXX_STANDARD 20)
 
+add_executable(example_cub_reduce_deterministic
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/cub_reduce_deterministic.cpp
+)
+target_link_libraries(example_cub_reduce_deterministic clangjit_lib)
+if(NOT MSVC)
+  target_compile_options(example_cub_reduce_deterministic PRIVATE -fno-rtti)
+endif()
+set_target_properties(example_cub_reduce_deterministic PROPERTIES CXX_STANDARD 20)
+
 add_executable(example_cub_reduce_custom_op
   ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/cub_reduce_custom_op.cpp
 )

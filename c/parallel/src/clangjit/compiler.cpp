@@ -154,7 +154,6 @@ public:
 
     arg_strings.push_back("-D__CLANGJIT_DEVICE_COMPILATION__=1");
     arg_strings.push_back("-DNDEBUG");
-    arg_strings.push_back("-D_CUB_DISABLE_CMATH");
     arg_strings.push_back("-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK");
     arg_strings.push_back("-D_CCCL_ENABLE_FREESTANDING=1");
     arg_strings.push_back("-DCCCL_DISABLE_FP16_SUPPORT=1");
@@ -413,7 +412,6 @@ public:
         "/clangjit/cuda_minimal/__clang_cuda_runtime_wrapper.h");
     arg_strings.push_back("-D__CLANGJIT_DEVICE_COMPILATION__=1");
     arg_strings.push_back("-DNDEBUG");
-    arg_strings.push_back("-D_CUB_DISABLE_CMATH");
     arg_strings.push_back("-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK");
     arg_strings.push_back("-D_CCCL_ENABLE_FREESTANDING=1");
     arg_strings.push_back("-DCCCL_DISABLE_FP16_SUPPORT=1");
@@ -548,7 +546,6 @@ public:
     }
 
     arg_strings.push_back("-DNDEBUG");
-    arg_strings.push_back("-D_CUB_DISABLE_CMATH");
     arg_strings.push_back("-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK");
     arg_strings.push_back("-D_CCCL_ENABLE_FREESTANDING=1");
     arg_strings.push_back("-DCCCL_DISABLE_FP16_SUPPORT=1");
