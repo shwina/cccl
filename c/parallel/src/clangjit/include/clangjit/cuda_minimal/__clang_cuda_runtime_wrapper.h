@@ -31,20 +31,7 @@
 #include <__clang_cuda_math_forward_declares.h>
 
 // ============================================================================
-// Phase 2: Pull in minimal standard headers (satisfied by our stubs)
-// ============================================================================
-// Define __CUDACC__ temporarily so that headers (e.g. libstdc++ with GNU
-// extensions) avoid __float128, which is unsupported in CUDA.
-#define __CUDACC__
-#include <climits>
-#include <cmath>
-#include <cstdlib>
-#include <stdlib.h>
-#include <string.h>
-#undef __CUDACC__
-
-// ============================================================================
-// Phase 3: cuda.h (needed for CUDA_VERSION used by clang headers below)
+// Phase 2: cuda.h (needed for CUDA_VERSION used by clang headers below)
 // ============================================================================
 #pragma push_macro("__THROW")
 #pragma push_macro("__CUDA_ARCH__")
@@ -78,6 +65,12 @@
 
 // ---- Builtin variables (threadIdx, blockIdx, etc.) ----
 #include "__clang_cuda_builtin_vars.h"
+
+// ---- Stubs needed by clang device function headers below ----
+// __clang_cuda_math.h uses INT_MAX/INT_MIN (from climits) and
+// HUGE_VAL/HUGE_VALF (from cmath). These go to our stubs, not system headers.
+#include <climits>
+#include <cmath>
 
 // ---- Libdevice function declarations & clang device function wrappers ----
 #include <__clang_cuda_libdevice_declares.h>
