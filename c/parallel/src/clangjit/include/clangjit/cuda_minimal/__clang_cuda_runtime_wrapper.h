@@ -122,47 +122,16 @@ namespace std { using namespace cuda::std; }
 #error "Unsupported CUDA version (need >= 9.0)!"
 #endif
 
-// Verify no libcudacxx header was pulled in before cuda_runtime.h.
-// If this fires, a header above transitively included a system header
-// that resolved to libcudacxx before all device-side definitions were ready.
-#ifdef CCCL_VERSION
-#error "libcudacxx was included before device-side definitions were set up"
-#endif
-
-// nv_weak -> weak so __attribute__((nv_weak)) works as __attribute__((weak))
-#pragma push_macro("nv_weak")
-#define nv_weak weak
-#undef __CUDA_LIBDEVICE__
-#define __CUDACC__
-#include "cuda_runtime.h"
-#pragma pop_macro("nv_weak")
-#undef __CUDACC__
-#define __CUDABE__
-
 // Clang does not have __nvvm_memcpy/__nvvm_memset; emulate with builtins.
 #define __nvvm_memcpy(s, d, n, a) __builtin_memcpy(s, d, n)
 #define __nvvm_memset(d, c, n, a) __builtin_memset(d, c, n)
 
-#include "crt/host_runtime.h"
-
-// device_runtime.h defines __cxa_* macros that conflict with cxxabi.h.
-#undef __cxa_vec_ctor
-#undef __cxa_vec_cctor
-#undef __cxa_vec_dtor
-#undef __cxa_vec_new
-#undef __cxa_vec_new2
-#undef __cxa_vec_new3
-#undef __cxa_vec_delete2
-#undef __cxa_vec_delete
-#undef __cxa_vec_delete3
-#undef __cxa_pure_virtual
-
-// __THROW was redefined to empty by CUDA headers; keep it that way.
+// __THROW may be in a weird state; keep it empty for CUDA includes.
 #undef __THROW
 #define __THROW
 
 // ============================================================================
-// Phase 6: Device-side function definitions from CUDA toolkit .hpp files
+// Phase 4: Device-side function definitions from CUDA toolkit .hpp files
 // ============================================================================
 // Poison __host__ to ensure none of these definitions get host attributes.
 #pragma push_macro("__host__")
@@ -256,6 +225,42 @@ static inline float erfcx(float __a) { return erfcxf(__a); }
 #pragma pop_macro("signbit")
 
 #pragma pop_macro("__host__")
+
+// ============================================================================
+// Phase 5: cuda_runtime.h (first header that transitively pulls in CCCL)
+// ============================================================================
+// ============================================================================
+// Phase 5: cuda_runtime.h (first header that transitively pulls in CCCL)
+// ============================================================================
+// Verify no libcudacxx header was pulled in yet. If this fires, a header
+// above transitively included a system header that resolved to libcudacxx
+// before all device-side definitions were ready.
+#ifdef CCCL_VERSION
+#error "libcudacxx was included before device-side definitions were set up"
+#endif
+
+#pragma push_macro("nv_weak")
+#define nv_weak weak
+#undef __CUDA_LIBDEVICE__
+#define __CUDACC__
+#include "cuda_runtime.h"
+#pragma pop_macro("nv_weak")
+#undef __CUDACC__
+#define __CUDABE__
+
+#include "crt/host_runtime.h"
+
+// device_runtime.h defines __cxa_* macros that conflict with cxxabi.h.
+#undef __cxa_vec_ctor
+#undef __cxa_vec_cctor
+#undef __cxa_vec_dtor
+#undef __cxa_vec_new
+#undef __cxa_vec_new2
+#undef __cxa_vec_new3
+#undef __cxa_vec_delete2
+#undef __cxa_vec_delete
+#undef __cxa_vec_delete3
+#undef __cxa_pure_virtual
 
 // Texture intrinsics (requires C++11).
 #if __cplusplus >= 201103L
