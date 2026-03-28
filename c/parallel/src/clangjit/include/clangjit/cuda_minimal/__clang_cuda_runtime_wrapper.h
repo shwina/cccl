@@ -96,21 +96,11 @@ __device__ __float128 __nv_fp128_fmin(__float128, __float128);
 namespace cuda { namespace std {} }
 namespace std { using namespace cuda::std; }
 
-// Verify no libcudacxx header was pulled in during Phase 2.
-#ifdef __CCCL_COMPILER_H
-#error "libcudacxx was included before device-side definitions were set up"
-#endif
-
 // ============================================================================
 // Phase 3: CUDA toolkit headers
 // ============================================================================
 // By this point all device-side functions and intrinsics are defined, so
 // any transitive CCCL includes from these headers will find them.
-#include "cuda.h"
-#if !defined(CUDA_VERSION) || CUDA_VERSION < 9000
-#error "Unsupported CUDA version (need >= 9.0)!"
-#endif
-
 #pragma push_macro("__CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__")
 
 #define __DEVICE_LAUNCH_PARAMETERS_H__
@@ -127,6 +117,17 @@ namespace std { using namespace cuda::std; }
 #undef __CUDACC__
 #include "driver_types.h"
 #include "host_config.h"
+#include "cuda.h"
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 9000
+#error "Unsupported CUDA version (need >= 9.0)!"
+#endif
+
+// Verify no libcudacxx header was pulled in before cuda_runtime.h.
+// If this fires, a header above transitively included a system header
+// that resolved to libcudacxx before all device-side definitions were ready.
+#ifdef CCCL_VERSION
+#error "libcudacxx was included before device-side definitions were set up"
+#endif
 
 // nv_weak -> weak so __attribute__((nv_weak)) works as __attribute__((weak))
 #pragma push_macro("nv_weak")
