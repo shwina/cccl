@@ -1,5 +1,0 @@
-#ifndef _CLANGJIT_CSTDIO
-#define _CLANGJIT_CSTDIO
-extern "C" { int printf(const char*, ...); }
-namespace std { using ::printf; }
-#endif
