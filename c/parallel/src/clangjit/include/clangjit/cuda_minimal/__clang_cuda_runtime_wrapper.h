@@ -31,34 +31,25 @@
 #include <__clang_cuda_math_forward_declares.h>
 
 // ============================================================================
-// Phase 2: cuda.h (needed for CUDA_VERSION used by clang headers below)
+// Phase 2: Clang device-side implementations & CCCL-required intrinsics
 // ============================================================================
+// These depend on CUDA_VERSION (from cuda.h), __device__ macro (from
+// host_defines.h), and compiler builtins. We define them before the heavy
+// CUDA toolkit headers (driver_types.h, cuda_runtime.h) that transitively
+// pull in CCCL via libcudacxx.
+
 #pragma push_macro("__THROW")
 #pragma push_macro("__CUDA_ARCH__")
-
-#include "cuda.h"
-#if !defined(CUDA_VERSION)
-#error "cuda.h did not define CUDA_VERSION"
-#elif CUDA_VERSION < 9000
-#error "Unsupported CUDA version (need >= 9.0)!"
-#endif
-
-#pragma push_macro("__CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__")
-#define __CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__
 
 #ifndef __CUDA_ARCH__
 #define __CUDA_ARCH__ 9999
 #endif
 
-// ============================================================================
-// Phase 4: Clang device-side implementations & CCCL-required intrinsics
-// ============================================================================
-// These only depend on CUDA_VERSION, __device__ macro (from host_defines.h),
-// and compiler builtins. We define them early so they are visible when CUDA
-// toolkit headers (Phase 5) transitively pull in CCCL via libcudacxx.
+// cuda.h provides CUDA_VERSION needed by clang headers below.
+// Its only system deps (stdlib.h, stdint.h) are satisfied by our stubs.
+#include "cuda.h"
 
 // host_defines.h provides __device__, __host__, __forceinline__ macros.
-// It does NOT pull in CCCL or any heavy CUDA runtime types.
 #define __CUDACC__
 #define __CUDA_LIBDEVICE__
 #include "host_defines.h"
@@ -67,8 +58,8 @@
 #include "__clang_cuda_builtin_vars.h"
 
 // ---- Stubs needed by clang device function headers below ----
-// __clang_cuda_math.h uses INT_MAX/INT_MIN (from climits) and
-// HUGE_VAL/HUGE_VALF (from cmath). These go to our stubs, not system headers.
+// These go to our stubs, not system headers.
+#include <cstddef>
 #include <climits>
 #include <cmath>
 
@@ -111,8 +102,17 @@ namespace cuda { namespace std {} }
 namespace std { using namespace cuda::std; }
 
 // ============================================================================
-// Phase 5: CUDA toolkit headers
+// Phase 3: CUDA toolkit headers
 // ============================================================================
+#if !defined(CUDA_VERSION)
+#error "cuda.h did not define CUDA_VERSION"
+#elif CUDA_VERSION < 9000
+#error "Unsupported CUDA version (need >= 9.0)!"
+#endif
+
+#pragma push_macro("__CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__")
+#define __CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__
+
 #define __DEVICE_LAUNCH_PARAMETERS_H__
 
 // Guard out CUDA's declaration-only headers; clang provides its own.
@@ -123,7 +123,7 @@ namespace std { using namespace cuda::std; }
 #define __DEVICE_FUNCTIONS_DECLS_H__
 
 // ---- CUDA runtime types (cudaError_t, dim3, cudaStream_t, etc.) ----
-// (host_defines.h already included above in Phase 4)
+// (host_defines.h already included in Phase 2)
 #undef __CUDACC__
 #include "driver_types.h"
 #include "host_config.h"
