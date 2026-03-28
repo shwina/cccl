@@ -31,12 +31,10 @@
 #include <__clang_cuda_math_forward_declares.h>
 
 // ============================================================================
-// Phase 2: Clang device-side implementations & CCCL-required intrinsics
+// Phase 2: Device-side definitions before any CUDA toolkit headers
 // ============================================================================
-// These depend on CUDA_VERSION (from cuda.h), __device__ macro (from
-// host_defines.h), and compiler builtins. We define them before the heavy
-// CUDA toolkit headers (driver_types.h, cuda_runtime.h) that transitively
-// pull in CCCL via libcudacxx.
+// Everything here uses only compiler builtins and our stubs. No CUDA toolkit
+// headers are included yet, so nothing can transitively pull in CCCL.
 
 #pragma push_macro("__THROW")
 #pragma push_macro("__CUDA_ARCH__")
@@ -45,11 +43,8 @@
 #define __CUDA_ARCH__ 9999
 #endif
 
-// cuda.h provides CUDA_VERSION needed by clang headers below.
-// Its only system deps (stdlib.h, stdint.h) are satisfied by our stubs.
-#include "cuda.h"
-
 // host_defines.h provides __device__, __host__, __forceinline__ macros.
+// Its only transitive dep (ctype.h) hits our stub.
 #define __CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__
 #define __CUDACC__
 #define __CUDA_LIBDEVICE__
@@ -59,15 +54,14 @@
 #include "__clang_cuda_builtin_vars.h"
 
 // ---- Stubs needed by clang device function headers below ----
-// These go to our stubs, not system headers.
 #include <cstddef>
 #include <climits>
 #include <cmath>
 
-// ---- Libdevice function declarations & clang device function wrappers ----
-#include <__clang_cuda_libdevice_declares.h>
-#include <__clang_cuda_device_functions.h>
-#include <__clang_cuda_math.h>
+// ---- Clang device function wrappers (local copies, CUDA < 9.0 removed) ----
+#include "__clang_cuda_libdevice_declares.h"
+#include "__clang_cuda_device_functions.h"
+#include "__clang_cuda_math.h"
 
 // ---- Address-space intrinsics needed by CCCL headers ----
 // (e.g. cuda/__memory/address_space.h, cuda/__ptx/ptx_helper_functions.h)
@@ -102,17 +96,22 @@ __device__ __float128 __nv_fp128_fmin(__float128, __float128);
 namespace cuda { namespace std {} }
 namespace std { using namespace cuda::std; }
 
+// Verify no libcudacxx header was pulled in during Phase 2.
+#ifdef __CCCL_COMPILER_H
+#error "libcudacxx was included before device-side definitions were set up"
+#endif
+
 // ============================================================================
 // Phase 3: CUDA toolkit headers
 // ============================================================================
-#if !defined(CUDA_VERSION)
-#error "cuda.h did not define CUDA_VERSION"
-#elif CUDA_VERSION < 9000
+// By this point all device-side functions and intrinsics are defined, so
+// any transitive CCCL includes from these headers will find them.
+#include "cuda.h"
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 9000
 #error "Unsupported CUDA version (need >= 9.0)!"
 #endif
 
 #pragma push_macro("__CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__")
-#define __CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__
 
 #define __DEVICE_LAUNCH_PARAMETERS_H__
 
