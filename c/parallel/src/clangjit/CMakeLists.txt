@@ -167,10 +167,34 @@ set_target_properties(clangjit_lib PROPERTIES
 )
 
 # --------------------------------------------------------------------------
-# Install Clang CUDA headers into wheel (for self-sufficient packaging)
+# Install clang headers into wheel (for self-sufficient packaging)
 # --------------------------------------------------------------------------
-file(GLOB _clang_cuda_headers "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__clang_cuda_*")
-install(FILES ${_clang_cuda_headers} DESTINATION "cuda/cccl/headers/clang")
+# Clang CUDA headers we still use from the LLVM source tree.
+# We DON'T install device_functions, math, or libdevice_declares — our local
+# copies in cuda_minimal/ replace them.
+set(_clang_cuda_headers_needed
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__clang_cuda_math_forward_declares.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__clang_cuda_builtin_vars.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__clang_cuda_cmath.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__clang_cuda_intrinsics.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__clang_cuda_complex_builtins.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__clang_cuda_texture_intrinsics.h"
+)
+install(FILES ${_clang_cuda_headers_needed} DESTINATION "cuda/cccl/headers/clang")
+
+# Clang builtin C headers needed by our stubs and CUDA toolkit headers.
+file(GLOB _clang_stddef_headers "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__stddef_*.h")
+set(_clang_c_headers
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/limits.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/stddef.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/stdint.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__stddef_header_macro.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/float.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/__float_header_macro.h"
+  "${llvm_project_SOURCE_DIR}/clang/lib/Headers/inttypes.h"
+  ${_clang_stddef_headers}
+)
+install(FILES ${_clang_c_headers} DESTINATION "cuda/cccl/headers/clang")
 
 # --------------------------------------------------------------------------
 # Examples
