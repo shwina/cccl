@@ -63,16 +63,11 @@ add_library(clangjit_lib
   config.cpp
   loader.cpp
   jit_compiler.cpp
-)
-
-target_include_directories(clangjit_lib PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${llvm_project_SOURCE_DIR}/llvm/include
-  ${llvm_project_BINARY_DIR}/include
-  ${llvm_project_SOURCE_DIR}/clang/include
-  ${llvm_project_BINARY_DIR}/tools/clang/include
-  ${llvm_project_SOURCE_DIR}/lld/include
-  ${llvm_project_BINARY_DIR}/tools/lld/include
+  codegen/types.cpp
+  codegen/iterators.cpp
+  codegen/operators.cpp
+  codegen/bitcode.cpp
+  codegen/cub_call.cpp
 )
 
 # CCCL_SOURCE_DIR points to the cccl repo root
@@ -82,7 +77,19 @@ cmake_path(GET _src_dir PARENT_PATH _c_parallel_dir)                # c/parallel
 cmake_path(GET _c_parallel_dir PARENT_PATH _c_dir)                  # c
 cmake_path(GET _c_dir PARENT_PATH _cccl_root)                       # cccl
 
+target_include_directories(clangjit_lib PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${_c_parallel_dir}/include
+  ${llvm_project_SOURCE_DIR}/llvm/include
+  ${llvm_project_BINARY_DIR}/include
+  ${llvm_project_SOURCE_DIR}/clang/include
+  ${llvm_project_BINARY_DIR}/tools/clang/include
+  ${llvm_project_SOURCE_DIR}/lld/include
+  ${llvm_project_BINARY_DIR}/tools/lld/include
+)
+
 target_compile_definitions(clangjit_lib PRIVATE
+  CCCL_C_EXPERIMENTAL=1
   CCCL_SOURCE_DIR="${_cccl_root}"
   CLANG_RESOURCE_DIR="${llvm_project_BINARY_DIR}/lib/clang/${LLVM_VERSION_MAJOR}"
   CLANG_HEADERS_DIR="${llvm_project_SOURCE_DIR}/clang/lib/Headers"
