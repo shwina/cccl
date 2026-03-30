@@ -87,7 +87,7 @@ build-dir = "build/{wheel_tag}"
 [tool.scikit-build.cmake]
 version = ">=3.21"
 args = []
-build-type = "Release"
+build-type = "MinSizeRel"
 source-dir = "."
 
 [tool.scikit-build.ninja]
