@@ -19,11 +19,23 @@
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
-#include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/TargetParser/Host.h>
+
+// Selective target initialization (X86 for host, NVPTX for device)
+extern "C" {
+void LLVMInitializeX86TargetInfo();
+void LLVMInitializeX86Target();
+void LLVMInitializeX86TargetMC();
+void LLVMInitializeX86AsmPrinter();
+void LLVMInitializeX86AsmParser();
+void LLVMInitializeNVPTXTargetInfo();
+void LLVMInitializeNVPTXTarget();
+void LLVMInitializeNVPTXTargetMC();
+void LLVMInitializeNVPTXAsmPrinter();
+}
 
 #ifdef _WIN32
 LLD_HAS_DRIVER(coff)
@@ -49,11 +61,15 @@ static void initialize_llvm() {
   if (llvm_initialized)
     return;
 
-  llvm::InitializeAllTargetInfos();
-  llvm::InitializeAllTargets();
-  llvm::InitializeAllTargetMCs();
-  llvm::InitializeAllAsmPrinters();
-  llvm::InitializeAllAsmParsers();
+  LLVMInitializeX86TargetInfo();
+  LLVMInitializeX86Target();
+  LLVMInitializeX86TargetMC();
+  LLVMInitializeX86AsmPrinter();
+  LLVMInitializeX86AsmParser();
+  LLVMInitializeNVPTXTargetInfo();
+  LLVMInitializeNVPTXTarget();
+  LLVMInitializeNVPTXTargetMC();
+  LLVMInitializeNVPTXAsmPrinter();
 
   llvm_initialized = true;
 }
