@@ -236,9 +236,10 @@ std::string CubCall::source() const
 CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_path, cccl_build_config* config) const
 {
   // 1. Configure compiler
-  auto jit_config      = clangjit::detectDefaultConfig();
-  jit_config.sm_version = cc_major * 10 + cc_minor;
-  jit_config.verbose    = false;
+  auto jit_config          = clangjit::detectDefaultConfig();
+  jit_config.sm_version     = cc_major * 10 + cc_minor;
+  jit_config.verbose        = false;
+  jit_config.entry_point_name = fn_name_;
   if (clang_path)
   {
     jit_config.clang_headers_path = clang_path;

@@ -14,9 +14,12 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Linker/Linker.h>
 #include <llvm/MC/TargetRegistry.h>
+#include <llvm/Passes/OptimizationLevel.h>
+#include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/VirtualFileSystem.h>
@@ -312,6 +315,48 @@ public:
                 llvm::Reloc::PIC_);
             if (tm) {
               mod->setDataLayout(tm->createDataLayout());
+
+              // Run optimization passes after linking to inline user-provided
+              // operations (from bitcode or embedded C++ source).
+              if (!config.entry_point_name.empty()) {
+                // Internalize all functions except the entry point and
+                // GPU kernels, so the optimizer can inline the linked
+                // bitcode functions.
+                for (auto &F : *mod) {
+                  if (!F.isDeclaration()
+                      && F.getLinkage() == llvm::GlobalValue::ExternalLinkage
+                      && F.getName() != config.entry_point_name
+                      && F.getCallingConv() != llvm::CallingConv::PTX_Kernel) {
+                    F.setLinkage(llvm::GlobalValue::InternalLinkage);
+                    F.addFnAttr(llvm::Attribute::AlwaysInline);
+                  }
+                }
+
+                llvm::OptimizationLevel opt_level;
+                switch (config.optimization_level) {
+                  case 0: opt_level = llvm::OptimizationLevel::O0; break;
+                  case 1: opt_level = llvm::OptimizationLevel::O1; break;
+                  case 3: opt_level = llvm::OptimizationLevel::O3; break;
+                  default: opt_level = llvm::OptimizationLevel::O2; break;
+                }
+
+                llvm::LoopAnalysisManager LAM;
+                llvm::FunctionAnalysisManager FAM;
+                llvm::CGSCCAnalysisManager CGAM;
+                llvm::ModuleAnalysisManager MAM;
+
+                llvm::PassBuilder PB(tm);
+                PB.registerModuleAnalyses(MAM);
+                PB.registerCGSCCAnalyses(CGAM);
+                PB.registerFunctionAnalyses(FAM);
+                PB.registerLoopAnalyses(LAM);
+                PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+                auto MPM = PB.buildPerModuleDefaultPipeline(opt_level);
+                MPM.run(*mod, MAM);
+
+              }
+
               std::error_code EC;
               llvm::raw_fd_ostream dest(output_ptx, EC);
               if (!EC) {

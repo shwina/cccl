@@ -121,6 +121,7 @@ target_link_libraries(clangjit_lib PUBLIC
   LLVMNVPTXDesc
   LLVMNVPTXInfo
   LLVMLinker
+  LLVMPasses
   # Clang
   clangAST
   clangBasic

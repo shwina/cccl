@@ -181,7 +181,7 @@ std::string generate_comparison_functor(cccl_op_t op, const std::string& key_typ
   }
 }
 
-// Returns the cuda::std (or cuda::) functor type string for a well-known op, or empty if not well-known.
+// Returns the cuda::std (or cuda::) functor type string for a well-known op, or nullptr if not well-known.
 const char* get_well_known_functor_type(cccl_op_kind_t kind)
 {
   switch (kind)
@@ -223,6 +223,95 @@ const char* get_well_known_functor_type(cccl_op_kind_t kind)
   }
 }
 
+// Returns the C++ operator symbol for a well-known op, or nullptr if none.
+const char* get_well_known_op_symbol(cccl_op_kind_t kind)
+{
+  switch (kind)
+  {
+    case CCCL_PLUS:
+      return "+";
+    case CCCL_MINUS:
+      return "-";
+    case CCCL_MULTIPLIES:
+      return "*";
+    case CCCL_DIVIDES:
+      return "/";
+    case CCCL_MODULUS:
+      return "%";
+    case CCCL_EQUAL_TO:
+      return "==";
+    case CCCL_NOT_EQUAL_TO:
+      return "!=";
+    case CCCL_GREATER:
+      return ">";
+    case CCCL_LESS:
+      return "<";
+    case CCCL_GREATER_EQUAL:
+      return ">=";
+    case CCCL_LESS_EQUAL:
+      return "<=";
+    case CCCL_BIT_AND:
+      return "&";
+    case CCCL_BIT_OR:
+      return "|";
+    case CCCL_BIT_XOR:
+      return "^";
+    default:
+      return nullptr;
+  }
+}
+
+// Generate preamble for a well-known binary op.
+// For custom types with user-provided code, declares the extern "C" function
+// and generates an operator overload that calls it.
+// For primitive types without user code, no preamble is needed.
+std::string generate_well_known_preamble(
+  cccl_op_t op, const std::string& accum_type, bool has_bitcode, bool is_comparison)
+{
+  const std::string op_name    = (op.name && op.name[0]) ? op.name : "user_op";
+  const std::string return_type = is_comparison ? "bool" : accum_type;
+  const char* symbol           = get_well_known_op_symbol(op.type);
+  bool has_user_code           = has_bitcode || (op.code_type == CCCL_OP_CPP_SOURCE && op.code && op.code_size > 0);
+
+  if (!has_user_code)
+  {
+    // Pure well-known op on a primitive type — no preamble needed.
+    return "";
+  }
+
+  std::string src;
+
+  if (op.code_type == CCCL_OP_CPP_SOURCE && op.code && op.code_size > 0)
+  {
+    // Embed C++ source directly (may contain type definitions).
+    src += std::string(op.code, op.code_size) + "\n\n";
+  }
+
+  // Declare the extern "C" function from bitcode.
+  if (has_bitcode)
+  {
+    src += std::format("extern \"C\" __device__ void {}(void* a_ptr, void* b_ptr, void* out_ptr);\n\n", op_name);
+  }
+
+  // Generate an operator overload that calls the user-provided function,
+  // so cuda::std::plus<> (etc.) can use it on custom types.
+  if (symbol)
+  {
+    src += std::format(
+      "__device__ {0} operator{1}(const {2}& lhs, const {2}& rhs) {{\n"
+      "    {0} ret;\n"
+      "    {3}((void*)&lhs, (void*)&rhs, (void*)&ret);\n"
+      "    return ret;\n"
+      "}}\n\n",
+      return_type,
+      symbol,
+      accum_type,
+      op_name);
+  }
+
+  return src;
+}
+
 } // anonymous namespace
 
 OperatorCode make_binary_op(
@@ -233,12 +322,14 @@ OperatorCode make_binary_op(
   const std::string& state_param,
   bool has_bitcode)
 {
-  // For well-known operations, use cuda::std functors directly instead of generating wrapper code.
+  // For well-known operations, use cuda::std functors directly.
+  // For custom types, generate an operator overload that wraps the user-provided function.
   const char* well_known_type = get_well_known_functor_type(op.type);
   if (well_known_type)
   {
     OperatorCode result;
     result.local_var  = var_name;
+    result.preamble   = generate_well_known_preamble(op, accum_type, has_bitcode, /*is_comparison=*/false);
     result.setup_code = std::format("{} {}{{}};", well_known_type, var_name);
     return result;
   }
@@ -270,12 +361,12 @@ OperatorCode make_comparison_op(
   const std::string& state_param,
   bool has_bitcode)
 {
-  // For well-known operations, use cuda::std functors directly.
   const char* well_known_type = get_well_known_functor_type(op.type);
   if (well_known_type)
   {
     OperatorCode result;
     result.local_var  = var_name;
+    result.preamble   = generate_well_known_preamble(op, key_type, has_bitcode, /*is_comparison=*/true);
     result.setup_code = std::format("{} {}{{}};", well_known_type, var_name);
     return result;
   }
