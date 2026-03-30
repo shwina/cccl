@@ -38,6 +38,7 @@ function(cccl_c_parallel_add_test target_name_var source)
       TEST_LIBCUDACXX_PATH="-I${CCCL_SOURCE_DIR}/libcudacxx/include"
       TEST_CTK_PATH="-I${CUDA_FIRST_INCLUDE_DIR}"
       TEST_INCLUDE_PATH="${CMAKE_CURRENT_SOURCE_DIR}"
+      CCCL_DISABLE_SASS_CHECK
   )
 
   add_test(NAME ${target_name} COMMAND ${target_name})

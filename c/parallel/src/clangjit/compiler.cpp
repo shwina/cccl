@@ -328,6 +328,9 @@ public:
                       && F.getName() != config.entry_point_name
                       && F.getCallingConv() != llvm::CallingConv::PTX_Kernel) {
                     F.setLinkage(llvm::GlobalValue::InternalLinkage);
+                    // Remove attributes that conflict with inlining
+                    F.removeFnAttr(llvm::Attribute::NoInline);
+                    F.removeFnAttr(llvm::Attribute::OptimizeNone);
                     F.addFnAttr(llvm::Attribute::AlwaysInline);
                   }
                 }
