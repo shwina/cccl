@@ -179,6 +179,8 @@ std::string CubCall::source() const
   std::string src;
   src += "#include <cuda_runtime.h>\n";
   src += "#include <cuda/std/iterator>\n";
+  src += "#include <cuda/std/functional>\n";
+  src += "#include <cuda/functional>\n";
   src += std::format("#include <{}>\n\n", include_);
 
   src += preamble;

@@ -181,6 +181,48 @@ std::string generate_comparison_functor(cccl_op_t op, const std::string& key_typ
   }
 }
 
+// Returns the cuda::std (or cuda::) functor type string for a well-known op, or empty if not well-known.
+const char* get_well_known_functor_type(cccl_op_kind_t kind)
+{
+  switch (kind)
+  {
+    case CCCL_PLUS:
+      return "::cuda::std::plus<>";
+    case CCCL_MINUS:
+      return "::cuda::std::minus<>";
+    case CCCL_MULTIPLIES:
+      return "::cuda::std::multiplies<>";
+    case CCCL_DIVIDES:
+      return "::cuda::std::divides<>";
+    case CCCL_MODULUS:
+      return "::cuda::std::modulus<>";
+    case CCCL_EQUAL_TO:
+      return "::cuda::std::equal_to<>";
+    case CCCL_NOT_EQUAL_TO:
+      return "::cuda::std::not_equal_to<>";
+    case CCCL_GREATER:
+      return "::cuda::std::greater<>";
+    case CCCL_LESS:
+      return "::cuda::std::less<>";
+    case CCCL_GREATER_EQUAL:
+      return "::cuda::std::greater_equal<>";
+    case CCCL_LESS_EQUAL:
+      return "::cuda::std::less_equal<>";
+    case CCCL_BIT_AND:
+      return "::cuda::std::bit_and<>";
+    case CCCL_BIT_OR:
+      return "::cuda::std::bit_or<>";
+    case CCCL_BIT_XOR:
+      return "::cuda::std::bit_xor<>";
+    case CCCL_MINIMUM:
+      return "::cuda::minimum<>";
+    case CCCL_MAXIMUM:
+      return "::cuda::maximum<>";
+    default:
+      return nullptr;
+  }
+}
+
 } // anonymous namespace
 
 OperatorCode make_binary_op(
@@ -191,6 +233,16 @@ OperatorCode make_binary_op(
   const std::string& state_param,
   bool has_bitcode)
 {
+  // For well-known operations, use cuda::std functors directly instead of generating wrapper code.
+  const char* well_known_type = get_well_known_functor_type(op.type);
+  if (well_known_type)
+  {
+    OperatorCode result;
+    result.local_var  = var_name;
+    result.setup_code = std::format("{} {}{{}};", well_known_type, var_name);
+    return result;
+  }
+
   const bool is_stateful = (op.type == CCCL_STATEFUL);
 
   OperatorCode result;
@@ -218,6 +270,16 @@ OperatorCode make_comparison_op(
   const std::string& state_param,
   bool has_bitcode)
 {
+  // For well-known operations, use cuda::std functors directly.
+  const char* well_known_type = get_well_known_functor_type(op.type);
+  if (well_known_type)
+  {
+    OperatorCode result;
+    result.local_var  = var_name;
+    result.setup_code = std::format("{} {}{{}};", well_known_type, var_name);
+    return result;
+  }
+
   const bool is_stateful = (op.type == CCCL_STATEFUL);
 
   OperatorCode result;
