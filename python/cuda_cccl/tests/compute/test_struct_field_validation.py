@@ -5,8 +5,8 @@
 """
 Tests for gpu_struct field-name validation.
 
-These tests are pure Python (no GPU required) and verify that invalid field names
-are rejected before they can reach the exec() calls in _jit.py.
+These tests verify that invalid field names are rejected before
+they can reach the exec() calls in _jit.py.
 """
 
 import numpy as np

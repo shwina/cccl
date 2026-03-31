@@ -231,6 +231,16 @@ def _create_void_ptr_wrapper(
     arg_str = ", ".join(arg_names)
     void_sig = types.void(*(types.voidptr for _ in arg_specs))
 
+    # validate that `name` and `arg_names` are all valid identifiers:
+    if not name.isidentifier():
+        raise ValueError(f"Invalid function name '{name}' - must be a valid identifier")
+
+    for arg_name in arg_names:
+        if not arg_name.isidentifier():
+            raise ValueError(
+                f"Invalid argument name '{arg_name}' - must be a valid identifier"
+            )
+
     # Create unique wrapper name using global counter
     sanitized_name = sanitize_identifier(name)
     with _wrapper_name_lock:
