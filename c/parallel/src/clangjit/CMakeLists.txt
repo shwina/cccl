@@ -149,12 +149,20 @@ if(CUDAToolkit_FOUND)
   target_link_libraries(clangjit_lib PUBLIC
     CUDA::cuda_driver
     CUDA::cudart
-    CUDA::nvJitLink_static
-    CUDA::nvptxcompiler_static
-    CUDA::nvfatbin_static
   )
-  if(MSVC)
-    target_compile_definitions(clangjit_lib PUBLIC _ITERATOR_DEBUG_LEVEL=0)
+  if(WIN32)
+    # On Windows, static CUDA libs are built with /MT which conflicts with
+    # the project's dynamic CRT (/MD). Use dynamic variants instead.
+    target_link_libraries(clangjit_lib PUBLIC
+      CUDA::nvJitLink
+      CUDA::nvfatbin
+    )
+  else()
+    target_link_libraries(clangjit_lib PUBLIC
+      CUDA::nvJitLink_static
+      CUDA::nvptxcompiler_static
+      CUDA::nvfatbin_static
+    )
   endif()
 endif()
 
