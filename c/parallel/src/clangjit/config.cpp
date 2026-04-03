@@ -49,6 +49,32 @@ CompilerConfig detectDefaultConfig() {
         config.sm_version = 75;
     }
 
+#ifdef _WIN32
+    // Detect MSVC and Windows SDK library paths for the linker.
+    // Parse the LIB environment variable and convert x86 paths to x64.
+    if (const char* lib_env = std::getenv("LIB")) {
+        std::string lib_str(lib_env);
+        std::string::size_type start = 0;
+        while (start < lib_str.size()) {
+            auto end = lib_str.find(';', start);
+            if (end == std::string::npos) end = lib_str.size();
+            std::string path = lib_str.substr(start, end - start);
+            start = end + 1;
+            if (path.empty()) continue;
+
+            // Replace trailing x86 with x64 in the path
+            auto pos = path.rfind("\\x86");
+            if (pos == std::string::npos) pos = path.rfind("/x86");
+            if (pos != std::string::npos) {
+                path.replace(pos + 1, 3, "x64");
+            }
+            if (std::filesystem::exists(path)) {
+                config.library_paths.push_back(path);
+            }
+        }
+    }
+#endif
+
     config.optimization_level = 2;
     config.debug = false;
     config.verbose = false;

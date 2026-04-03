@@ -12,6 +12,13 @@ else()
   message(FATAL_ERROR "CPM.cmake not found at ${_cccl_cmake_dir}/CPM.cmake")
 endif()
 
+if(MSVC AND CMAKE_BUILD_TYPE STREQUAL "Debug")
+  message(FATAL_ERROR
+    "clangjit does not support Debug builds on Windows. "
+    "The statically-linked LLVM Debug build is too large and causes stack "
+    "overflows at runtime. Use MinSizeRel, Release, or RelWithDebInfo instead.")
+endif()
+
 set(CLANGJIT_LLVM_VERSION "llvmorg-22.1.1" CACHE STRING "LLVM git tag to fetch")
 
 # List options must be set before CPMAddPackage
@@ -243,3 +250,16 @@ if(NOT MSVC)
   target_compile_options(example_cub_adjacent_difference PRIVATE -fno-rtti)
 endif()
 set_target_properties(example_cub_adjacent_difference PROPERTIES CXX_STANDARD 20)
+
+# On Windows with multi-config generators (Visual Studio), exclude clangjit
+# targets from Debug builds — the LLVM Debug build causes stack overflows.
+if(MSVC)
+  set_target_properties(
+    clangjit_lib
+    example_cub_reduce
+    example_cub_reduce_deterministic
+    example_cub_reduce_custom_op
+    example_cub_adjacent_difference
+    PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD_DEBUG TRUE
+  )
+endif()

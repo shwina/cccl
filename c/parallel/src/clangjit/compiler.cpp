@@ -132,7 +132,12 @@ public:
     arg_strings.push_back("x86-64");
     arg_strings.push_back("-fcuda-is-device");
     arg_strings.push_back("-fcuda-allow-variadic-functions");
+#ifdef _WIN32
+    arg_strings.push_back("-fms-compatibility");
+    arg_strings.push_back("-fms-compatibility-version=19.40");
+#else
     arg_strings.push_back("-fgnuc-version=4.2.1");
+#endif
     arg_strings.push_back("-mlink-builtin-bitcode");
     arg_strings.push_back(config.cuda_toolkit_path +
                           "/nvvm/libdevice/libdevice.10.bc");
@@ -440,7 +445,12 @@ public:
     arg_strings.push_back("x86-64");
     arg_strings.push_back("-fcuda-is-device");
     arg_strings.push_back("-fcuda-allow-variadic-functions");
+#ifdef _WIN32
+    arg_strings.push_back("-fms-compatibility");
+    arg_strings.push_back("-fms-compatibility-version=19.40");
+#else
     arg_strings.push_back("-fgnuc-version=4.2.1");
+#endif
     arg_strings.push_back("-mlink-builtin-bitcode");
     arg_strings.push_back(config.cuda_toolkit_path +
                           "/nvvm/libdevice/libdevice.10.bc");
@@ -574,7 +584,12 @@ public:
     arg_strings.push_back("-target-cpu");
     arg_strings.push_back("x86-64");
     arg_strings.push_back("-fcuda-allow-variadic-functions");
+#ifdef _WIN32
+    arg_strings.push_back("-fms-compatibility");
+    arg_strings.push_back("-fms-compatibility-version=19.40");
+#else
     arg_strings.push_back("-fgnuc-version=4.2.1");
+#endif
     arg_strings.push_back("-mrelocation-model");
     arg_strings.push_back("pic");
     arg_strings.push_back("-pic-level");
