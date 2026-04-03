@@ -222,12 +222,8 @@ std::string CubCall::source() const
   }
   src += ");\n\n";
 
-  // Synchronization and error return
-  src += "    if (d_temp_storage != nullptr) {\n"
-         "        cudaError_t sync_err = cudaDeviceSynchronize();\n"
-         "        if (err == cudaSuccess) err = sync_err;\n"
-         "    }\n\n"
-         "    return (int)err;\n"
+  // Error return
+  src += "    return (int)err;\n"
          "}\n";
 
   return src;
