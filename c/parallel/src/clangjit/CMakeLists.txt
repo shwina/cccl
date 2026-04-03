@@ -212,6 +212,17 @@ set(_clang_c_headers
 )
 install(FILES ${_clang_c_headers} DESTINATION "cuda/cccl/headers/clang")
 
+# Clangjit's minimal CUDA runtime headers (replacements for upstream clang headers)
+set(_clangjit_cuda_minimal_dir "${CMAKE_CURRENT_SOURCE_DIR}/include/clangjit/cuda_minimal")
+file(GLOB _clangjit_cuda_minimal_headers "${_clangjit_cuda_minimal_dir}/*.h")
+install(FILES ${_clangjit_cuda_minimal_headers}
+  DESTINATION "cuda/cccl/headers/clangjit/cuda_minimal")
+
+# Clangjit's stub headers (minimal C++ standard library stubs for device compilation)
+file(GLOB _clangjit_cuda_minimal_stubs "${_clangjit_cuda_minimal_dir}/stubs/*")
+install(FILES ${_clangjit_cuda_minimal_stubs}
+  DESTINATION "cuda/cccl/headers/clangjit/cuda_minimal/stubs")
+
 # --------------------------------------------------------------------------
 # Examples
 # --------------------------------------------------------------------------

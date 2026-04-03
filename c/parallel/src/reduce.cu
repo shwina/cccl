@@ -14,6 +14,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <string>
 
 using namespace clangjit::codegen;
 
@@ -30,17 +32,52 @@ CUresult cccl_device_reduce_build_ex(
   int cc_minor,
   const char* /*cub_path*/,
   const char* /*thrust_path*/,
-  const char* /*libcudacxx_path*/,
-  const char* /*ctk_path*/,
+  const char* libcudacxx_path,
+  const char* ctk_path,
   const char* clang_path,
   cccl_build_config* build_config)
 try
 {
+  // cub_path is an -I prefixed path to the CCCL headers directory;
+  // strip the -I prefix to get the bare path for the compiler config.
+  const char* cccl_include_path = nullptr;
+  std::string cccl_include_str;
+  if (libcudacxx_path && libcudacxx_path[0] != '\0')
+  {
+    cccl_include_str = libcudacxx_path;
+    if (cccl_include_str.substr(0, 2) == "-I")
+    {
+      cccl_include_str = cccl_include_str.substr(2);
+    }
+    cccl_include_path = cccl_include_str.c_str();
+  }
+
+  // ctk_path is an -I prefixed path to the CTK include directory;
+  // strip the -I prefix and /include suffix to get the toolkit root.
+  const char* ctk_root = nullptr;
+  std::string ctk_root_str;
+  if (ctk_path && ctk_path[0] != '\0')
+  {
+    ctk_root_str = ctk_path;
+    if (ctk_root_str.substr(0, 2) == "-I")
+    {
+      ctk_root_str = ctk_root_str.substr(2);
+    }
+    // The Python layer passes the include directory itself; the C++ config
+    // expects the toolkit root (parent of include/).
+    std::filesystem::path p(ctk_root_str);
+    if (p.filename() == "include")
+    {
+      ctk_root_str = p.parent_path().string();
+    }
+    ctk_root = ctk_root_str.c_str();
+  }
+
   auto result = CubCall::from("cub/device/device_reduce.cuh")
                   .run("cub::DeviceReduce::Reduce")
                   .name("cccl_jit_reduce")
                   .with(temp_storage, temp_bytes, in(input_it), out(output_it), num_items, op, init)
-                  .compile(cc_major, cc_minor, clang_path, build_config);
+                  .compile(cc_major, cc_minor, clang_path, build_config, ctk_root, cccl_include_path);
 
   build->cc               = cc_major * 10 + cc_minor;
   build->cubin            = nullptr;

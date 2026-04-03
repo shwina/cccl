@@ -345,6 +345,8 @@ __device__ inline __cuda_builtin_gridDim_t::operator uint3() const {
 // curand_mtgp32_kernel redefines blockDim/threadIdx with dim3/uint3 types,
 // which is incompatible with our builtins. Force-include it with types
 // redefined to our builtin types.
+// Skip when cuRAND headers are unavailable (e.g. pip-installed toolkit).
+#if __has_include("curand_mtgp32_kernel.h")
 #pragma push_macro("dim3")
 #pragma push_macro("uint3")
 #define dim3 __cuda_builtin_blockDim_t
@@ -352,6 +354,7 @@ __device__ inline __cuda_builtin_gridDim_t::operator uint3() const {
 #include "curand_mtgp32_kernel.h"
 #pragma pop_macro("dim3")
 #pragma pop_macro("uint3")
+#endif
 #pragma pop_macro("__CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__")
 
 // Kernel launch configuration function.
@@ -361,12 +364,16 @@ extern "C" unsigned __cudaPushCallConfiguration(dim3 gridDim, dim3 blockDim,
                                                 void *stream = 0);
 #endif
 
-// On Windows, the JIT DLL is linked with /NOENTRY /NODEFAULTLIB so there is
-// no CRT.  The CUDA module constructor calls atexit() to register a cleanup
-// function, but without CRT the real atexit is unavailable.  Provide a no-op
-// stub — the JIT DLL is short-lived and unloaded explicitly.
-#if defined(_MSC_VER) && !defined(__CLANGJIT_DEVICE_COMPILATION__)
+// The JIT shared library is linked without the C runtime (no libc on the link
+// line) so atexit is unavailable.  The CUDA module constructor calls atexit()
+// to register a cleanup function.  Provide a no-op stub — the JIT library is
+// short-lived and unloaded explicitly.
+#if !defined(__CLANGJIT_DEVICE_COMPILATION__)
+#if defined(_MSC_VER)
 extern "C" int atexit(void (__cdecl *)(void)) { return 0; }
+#else
+extern "C" int atexit(void (*)(void)) { return 0; }
+#endif
 #endif
 
 #endif // __CUDA__ && __clang__

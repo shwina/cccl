@@ -110,7 +110,7 @@ bool DynamicLibrary::load(const std::string& library_path) {
     runStaticInitializers(static_cast<HMODULE>(handle_));
 #else
     dlerror();
-    handle_ = dlopen(library_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    handle_ = dlopen(library_path.c_str(), RTLD_LAZY | RTLD_LOCAL);
 
     if (!handle_) {
         const char* error = dlerror();

@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <stdexcept>
 
@@ -229,7 +230,8 @@ std::string CubCall::source() const
   return src;
 }
 
-CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_path, cccl_build_config* config) const
+CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_path, cccl_build_config* config,
+                               const char* ctk_path, const char* cccl_include_path) const
 {
   // 1. Configure compiler
   auto jit_config          = clangjit::detectDefaultConfig();
@@ -239,6 +241,39 @@ CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_pat
   if (clang_path)
   {
     jit_config.clang_headers_path = clang_path;
+  }
+  if (ctk_path && ctk_path[0] != '\0')
+  {
+    jit_config.cuda_toolkit_path = ctk_path;
+    // Rebuild library_paths from the new toolkit root so the linker
+    // can find libcudart.so in the pip-installed layout.
+    jit_config.library_paths.clear();
+    for (const char* subdir : {"lib64", "lib"})
+    {
+      auto candidate = std::filesystem::path(ctk_path) / subdir;
+      if (std::filesystem::exists(candidate))
+      {
+        jit_config.library_paths.push_back(candidate.string());
+      }
+    }
+  }
+  if (cccl_include_path && cccl_include_path[0] != '\0')
+  {
+    jit_config.cccl_include_path = cccl_include_path;
+    // When CCCL headers are pip-installed, the clangjit cuda_minimal headers
+    // are installed alongside them under the parent directory:
+    //   cccl_include_path = .../cuda/cccl/headers/include/
+    //   clangjit headers  = .../cuda/cccl/headers/clangjit/cuda_minimal/
+    // So derive clangjit_include_path as the parent of cccl_include_path.
+    if (jit_config.clangjit_include_path.empty()
+        || !std::filesystem::exists(jit_config.clangjit_include_path + "/clangjit/cuda_minimal"))
+    {
+      auto parent = std::filesystem::path(cccl_include_path).parent_path().string();
+      if (std::filesystem::exists(parent + "/clangjit/cuda_minimal"))
+      {
+        jit_config.clangjit_include_path = parent;
+      }
+    }
   }
 
   // Apply extra build configuration

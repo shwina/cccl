@@ -80,8 +80,10 @@ public:
   CubCallResult compile(
     int cc_major,
     int cc_minor,
-    const char* clang_path    = nullptr,
-    cccl_build_config* config = nullptr) const;
+    const char* clang_path         = nullptr,
+    cccl_build_config* config      = nullptr,
+    const char* ctk_path           = nullptr,
+    const char* cccl_include_path  = nullptr) const;
 
 private:
   std::string include_;

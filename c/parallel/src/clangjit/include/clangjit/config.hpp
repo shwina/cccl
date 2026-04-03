@@ -10,6 +10,7 @@ struct CompilerConfig {
     std::string cuda_toolkit_path;
     std::string clangjit_include_path;  // Path to clangjit include directory (for minimal CUDA runtime)
     std::string clang_headers_path;     // Path to Clang's built-in CUDA headers (overrides CLANG_HEADERS_DIR)
+    std::string cccl_include_path;      // Path to CCCL headers (overrides CCCL_SOURCE_DIR); contains cub/, thrust/, cuda/
     std::vector<std::string> include_paths;
     std::vector<std::string> library_paths;
     std::vector<std::string> device_bitcode_files;  // Paths to .bc files to link into device code

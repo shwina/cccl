@@ -210,15 +210,31 @@ public:
                               ? std::string(CLANG_HEADERS_DIR)
                               : config.clang_headers_path);
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(
-        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(
+          std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
+    } else {
+      arg_strings.push_back(config.cccl_include_path + "/cuda/std");
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(
-        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(
+          std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(config.cuda_toolkit_path + "/include");
     arg_strings.push_back("-include");
@@ -523,15 +539,31 @@ public:
                               ? std::string(CLANG_HEADERS_DIR)
                               : config.clang_headers_path);
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(
-        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(
+          std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
+    } else {
+      arg_strings.push_back(config.cccl_include_path + "/cuda/std");
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(
-        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(
+          std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(config.cuda_toolkit_path + "/include");
     arg_strings.push_back("-include");
@@ -658,15 +690,31 @@ public:
                               ? std::string(CLANG_HEADERS_DIR)
                               : config.clang_headers_path);
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(
-        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(
+          std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include/cuda/std");
+    } else {
+      arg_strings.push_back(config.cccl_include_path + "/cuda/std");
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(
-        std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(
+          std::string(CCCL_SOURCE_DIR) + "/libcudacxx/include");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/cub");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
-    arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
+    if (config.cccl_include_path.empty()) {
+      arg_strings.push_back(std::string(CCCL_SOURCE_DIR) + "/thrust");
+    } else {
+      arg_strings.push_back(config.cccl_include_path);
+    }
     arg_strings.push_back("-internal-isystem");
     arg_strings.push_back(config.cuda_toolkit_path + "/include");
     arg_strings.push_back("-include");
@@ -1061,28 +1109,47 @@ public:
     arg_strings.push_back("--eh-frame-hdr");
     arg_strings.push_back("-m");
     arg_strings.push_back("elf_x86_64");
+    // Allow unresolved symbols — they will be satisfied at dlopen() time
+    // by libraries already loaded in the host process (libc, libstdc++,
+    // cudart, etc.).  This removes the need for system CRT objects and
+    // dev packages on the target machine.
+    arg_strings.push_back("--allow-shlib-undefined");
     arg_strings.push_back("-o");
     arg_strings.push_back(output_path);
-    arg_strings.push_back("/usr/lib/x86_64-linux-gnu/crti.o");
-    arg_strings.push_back("/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginS.o");
 
     for (const auto &lib_path : config.library_paths) {
       arg_strings.push_back("-L" + lib_path);
+      // Embed the library path as RPATH so the dynamic linker can find
+      // libcudart.so.XX at dlopen time without LD_LIBRARY_PATH.
+      arg_strings.push_back("-rpath");
+      arg_strings.push_back(lib_path);
     }
-    arg_strings.push_back("-L/usr/lib/gcc/x86_64-linux-gnu/13");
-    arg_strings.push_back("-L/usr/lib/x86_64-linux-gnu");
-    arg_strings.push_back("-L/usr/lib");
 
     for (const auto &obj_file : object_files) {
       arg_strings.push_back(obj_file);
     }
 
-    arg_strings.push_back("-lcudart");
-    arg_strings.push_back("-lstdc++");
-    arg_strings.push_back("-lgcc_s");
-    arg_strings.push_back("-lc");
-    arg_strings.push_back("/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o");
-    arg_strings.push_back("/usr/lib/x86_64-linux-gnu/crtn.o");
+    // pip packages ship libcudart.so.XX without an unversioned symlink,
+    // so -lcudart won't work.  Find the actual .so by scanning library_paths.
+    {
+      bool found_cudart = false;
+      for (const auto &lib_path : config.library_paths) {
+        namespace fs = std::filesystem;
+        if (!fs::exists(lib_path)) continue;
+        for (const auto &entry : fs::directory_iterator(lib_path)) {
+          auto fname = entry.path().filename().string();
+          if (fname.starts_with("libcudart.so")) {
+            arg_strings.push_back(entry.path().string());
+            found_cudart = true;
+            break;
+          }
+        }
+        if (found_cudart) break;
+      }
+      if (!found_cudart) {
+        arg_strings.push_back("-lcudart");
+      }
+    }
 #endif
 
     std::vector<const char *> args;
