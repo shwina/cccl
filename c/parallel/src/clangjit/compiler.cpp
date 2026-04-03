@@ -46,6 +46,10 @@ LLD_HAS_DRIVER(coff)
 LLD_HAS_DRIVER(elf)
 #endif
 
+#ifdef _WIN32
+#include <llvm/Object/COFFImportFile.h>
+#endif
+
 #include <nvFatbin.h>
 #include <nvJitLink.h>
 
@@ -76,6 +80,56 @@ static void initialize_llvm() {
 
   llvm_initialized = true;
 }
+
+#ifdef _WIN32
+// Generate a minimal COFF import library for a given DLL.
+// This allows linking without requiring the Windows SDK or MSVC .lib files.
+// Symbols can be "name" or "name=dllexport" for aliasing.
+static bool generateImportLib(const std::string &dll_name,
+                              const std::vector<std::string> &symbols,
+                              const std::string &output_path,
+                              bool data_only = false) {
+  std::vector<llvm::object::COFFShortExport> exports;
+  for (const auto &sym : symbols) {
+    llvm::object::COFFShortExport exp;
+    auto eq = sym.find('=');
+    if (eq != std::string::npos) {
+      // "atexit=_crt_atexit" means: linker sees "atexit", DLL exports "_crt_atexit"
+      exp.Name = sym.substr(0, eq);        // symbol name the linker resolves
+      exp.ImportName = sym.substr(eq + 1); // actual DLL export name
+    } else {
+      exp.Name = sym;
+    }
+    exp.Data = data_only;
+    exports.push_back(exp);
+  }
+  auto err = llvm::object::writeImportLibrary(
+      dll_name, output_path, exports, llvm::COFF::IMAGE_FILE_MACHINE_AMD64,
+      /*MinGW=*/false);
+  if (err) {
+    llvm::consumeError(std::move(err));
+    return false;
+  }
+  return true;
+}
+
+// Find the actual DLL filename for cudart (e.g. "cudart64_13.dll") by
+// scanning the CUDA toolkit bin directory.
+static std::string findCudartDllName(const std::string &cuda_toolkit_path) {
+  namespace fs = std::filesystem;
+  for (const auto &subdir : {"bin/x64", "bin"}) {
+    fs::path dir = fs::path(cuda_toolkit_path) / subdir;
+    if (!fs::exists(dir))
+      continue;
+    for (const auto &entry : fs::directory_iterator(dir)) {
+      auto name = entry.path().filename().string();
+      if (name.starts_with("cudart64_") && name.ends_with(".dll"))
+        return name;
+    }
+  }
+  return "cudart64_12.dll"; // fallback
+}
+#endif
 
 class CUDACompiler::Impl {
 public:
@@ -924,22 +978,81 @@ public:
 #ifdef _WIN32
     arg_strings.push_back("lld-link");
     arg_strings.push_back("/DLL");
+    arg_strings.push_back("/NOENTRY");
+    arg_strings.push_back("/NODEFAULTLIB");
     arg_strings.push_back("/OUT:" + output_path);
 
-    for (const auto &lib_path : config.library_paths) {
-      arg_strings.push_back("/LIBPATH:" + lib_path);
-    }
+    // Generate import libraries from DLLs present on the system,
+    // so we don't require the Windows SDK or MSVC .lib files.
+    std::string implib_dir =
+        std::filesystem::path(output_path).parent_path().string();
 
-    arg_strings.push_back("/LIBPATH:" + config.cuda_toolkit_path + "/lib/x64");
+    std::string cudart_dll = findCudartDllName(config.cuda_toolkit_path);
+    generateImportLib(
+        cudart_dll,
+        {"cudaMalloc", "cudaFree", "cudaMemcpy", "cudaMemcpyAsync",
+         "cudaMemset", "cudaMemsetAsync",
+         "cudaDeviceSynchronize", "cudaGetDevice", "cudaGetDeviceProperties",
+         "cudaGetLastError", "cudaPeekAtLastError", "cudaGetErrorString",
+         "cudaStreamCreate", "cudaStreamDestroy", "cudaStreamSynchronize",
+         "cudaEventCreate", "cudaEventDestroy", "cudaEventRecord",
+         "cudaEventSynchronize", "cudaEventElapsedTime",
+         "cudaMallocAsync", "cudaFreeAsync",
+         "cudaDeviceGetAttribute",
+         "cudaOccupancyMaxActiveBlocksPerMultiprocessor",
+         "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+         "cudaFuncGetAttributes",
+         "cudaLaunchKernel", "cudaLaunchKernelExC",
+         "__cudaRegisterFatBinary", "__cudaRegisterFatBinaryEnd",
+         "__cudaUnregisterFatBinary", "__cudaRegisterFunction",
+         "__cudaRegisterVar",
+         "__cudaPushCallConfiguration", "__cudaPopCallConfiguration"},
+        implib_dir + "/cudart.lib");
+
+    generateImportLib(
+        "ucrtbase.dll",
+        {"malloc", "free", "calloc", "realloc",
+         "_callnewh", "_errno", "abort", "exit",
+         "_exit", "_register_onexit_function",
+         "_crt_atexit", "_initterm", "_initterm_e",
+         "memcpy", "memset", "memmove", "memcmp",
+         "strlen", "strcmp", "strncmp",
+         "_initialize_onexit_table",
+         "_execute_onexit_table",
+         "_register_thread_local_exe_atexit_callback"},
+        implib_dir + "/ucrt.lib");
+
+    generateImportLib(
+        "vcruntime140.dll",
+        {"__std_exception_copy", "__std_exception_destroy",
+         "__CxxFrameHandler3", "_CxxThrowException",
+         "memcpy", "memset", "memmove", "memcmp",
+         "__std_type_info_destroy_list",
+         "_purecall"},
+        implib_dir + "/vcruntime.lib");
+
+    generateImportLib(
+        "kernel32.dll",
+        {"InitializeCriticalSection", "EnterCriticalSection",
+         "LeaveCriticalSection", "DeleteCriticalSection",
+         "InitOnceExecuteOnce",
+         "LoadLibraryExA", "LoadLibraryExW",
+         "GetProcAddress", "FreeLibrary", "GetModuleHandleA",
+         "GetLastError", "SetLastError",
+         "GetCurrentProcess", "GetCurrentThread", "GetCurrentThreadId",
+         "VirtualProtect", "FlushInstructionCache",
+         "QueryPerformanceCounter", "QueryPerformanceFrequency"},
+        implib_dir + "/kernel32.lib");
+
+    arg_strings.push_back("/LIBPATH:" + implib_dir);
 
     for (const auto &obj_file : object_files) {
       arg_strings.push_back(obj_file);
     }
 
     arg_strings.push_back("cudart.lib");
-    arg_strings.push_back("msvcrt.lib");
-    arg_strings.push_back("vcruntime.lib");
     arg_strings.push_back("ucrt.lib");
+    arg_strings.push_back("vcruntime.lib");
     arg_strings.push_back("kernel32.lib");
 #else
     arg_strings.push_back("ld.lld");

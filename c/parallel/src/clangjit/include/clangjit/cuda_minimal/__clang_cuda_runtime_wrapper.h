@@ -361,5 +361,13 @@ extern "C" unsigned __cudaPushCallConfiguration(dim3 gridDim, dim3 blockDim,
                                                 void *stream = 0);
 #endif
 
+// On Windows, the JIT DLL is linked with /NOENTRY /NODEFAULTLIB so there is
+// no CRT.  The CUDA module constructor calls atexit() to register a cleanup
+// function, but without CRT the real atexit is unavailable.  Provide a no-op
+// stub — the JIT DLL is short-lived and unloaded explicitly.
+#if defined(_MSC_VER) && !defined(__CLANGJIT_DEVICE_COMPILATION__)
+extern "C" int atexit(void (__cdecl *)(void)) { return 0; }
+#endif
+
 #endif // __CUDA__ && __clang__
 #endif // __CLANG_CUDA_RUNTIME_WRAPPER_H__
