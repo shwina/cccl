@@ -117,13 +117,6 @@ segmented_sort/keys:
       "Elements{io}": 22
       "MaxSegmentSize": 10
 
-segmented_reduce/sum:
-  benchmarks:
-    small:
-      "T{ct}": "I32"
-      "Elements{io}": 16
-      "SegmentSize": 1
-
 segmented_reduce/variable_sum:
   benchmarks:
     variable_default:
