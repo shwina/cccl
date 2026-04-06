@@ -21,9 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import cupy as cp
 import numpy as np
 from utils import (
-    FUNDAMENTAL_TYPES as TYPE_MAP,
-)
-from utils import (
+    ALL_TYPES,
     as_cupy_stream,
     generate_data_with_entropy,
     generate_uniform_segment_offsets,
@@ -31,6 +29,8 @@ from utils import (
 
 import cuda.bench as bench
 from cuda.compute import OpKind, make_segmented_reduce
+
+TYPE_MAP = {k: ALL_TYPES[k] for k in ("I32", "I64", "F32", "F64")}
 
 
 def run_segmented_reduce(
