@@ -2,6 +2,33 @@ cmake_minimum_required(VERSION 3.21)
 
 project(CCCL_C_Parallel LANGUAGES CUDA CXX C)
 
+# Bootstrap CCCL cmake helpers when building c/parallel in isolation
+# (i.e. not as a subdirectory of the CCCL super-project).
+if (NOT COMMAND cccl_configure_target)
+  # Repo root is two levels up from this file (c/parallel -> c -> cccl)
+  get_filename_component(
+    _cccl_root
+    "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    ABSOLUTE
+  )
+  set(CCCL_SOURCE_DIR "${_cccl_root}" CACHE PATH "CCCL repo root" FORCE)
+  set(
+    CCCL_BINARY_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}"
+    CACHE PATH
+    "CCCL binary root"
+    FORCE
+  )
+  include("${_cccl_root}/cmake/CCCLUtilities.cmake")
+  include("${_cccl_root}/cmake/CCCLConfigureTarget.cmake")
+  include("${_cccl_root}/cmake/CCCLGetDependencies.cmake")
+  # cccl.compiler_interface is normally created by cccl_build_compiler_targets()
+  # from the root. Provide a no-op stub for standalone builds.
+  if (NOT TARGET cccl.compiler_interface)
+    add_library(cccl.compiler_interface INTERFACE)
+  endif()
+endif()
+
 option(CCCL_C_Parallel_ENABLE_TESTING "Build cccl.c.parallel tests." OFF)
 option(
   CCCL_C_Parallel_ENABLE_HEADER_TESTING
@@ -28,6 +55,8 @@ file(
 )
 # Exclude clangjit sources — they are built as a separate library
 list(FILTER srcs EXCLUDE REGEX "^src/clangjit/")
+# Exclude editor lock/temp files (e.g. Emacs .#file.cu)
+list(FILTER srcs EXCLUDE REGEX "/\\.#")
 
 add_library(cccl.c.parallel SHARED ${srcs})
 set_property(TARGET cccl.c.parallel PROPERTY POSITION_INDEPENDENT_CODE ON)
