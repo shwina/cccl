@@ -1,18 +1,17 @@
-#include <clangjit/codegen/cub_call.hpp>
-#include <clangjit/codegen/bitcode.hpp>
-#include <clangjit/codegen/iterators.hpp>
-#include <clangjit/codegen/operators.hpp>
-#include <clangjit/codegen/types.hpp>
-
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <format>
 #include <stdexcept>
 
+#include <clangjit/codegen/bitcode.hpp>
+#include <clangjit/codegen/cub_call.hpp>
+#include <clangjit/codegen/iterators.hpp>
+#include <clangjit/codegen/operators.hpp>
+#include <clangjit/codegen/types.hpp>
+
 namespace clangjit::codegen
 {
-
 CubCall CubCall::from(const char* include_header)
 {
   CubCall c;
@@ -36,7 +35,6 @@ CubCall& CubCall::name(const char* export_name)
 // Priority: first cccl_value_t, then first input_t's value_type.
 namespace
 {
-
 cccl_type_info find_accum_type(const std::vector<Arg>& args)
 {
   // First: look for cccl_value_t (init value defines accum type)
@@ -65,7 +63,6 @@ cccl_type_info find_accum_type(const std::vector<Arg>& args)
   }
   return cccl_type_info{sizeof(int), alignof(int), CCCL_INT32};
 }
-
 } // anonymous namespace
 
 std::string CubCall::source() const
@@ -124,7 +121,7 @@ std::string CubCall::source() const
           auto param_name  = std::format("d_in_{}", idx);
 
           auto value_type = get_type_name(a.it.value_type.type);
-          auto code = make_input_iterator(a.it, value_type, "accum_t", struct_name, var_name, param_name);
+          auto code       = make_input_iterator(a.it, value_type, "accum_t", struct_name, var_name, param_name);
 
           preamble += code.preamble;
           params.push_back(std::format("void* {}", param_name));
@@ -147,11 +144,11 @@ std::string CubCall::source() const
         }
         else if constexpr (std::is_same_v<T, cccl_op_t>)
         {
-          auto idx           = op_count++;
-          auto functor_name  = std::format("Op_{}", idx);
-          auto var_name      = std::format("op_{}", idx);
-          auto state_param   = std::format("op_{}_state", idx);
-          bool has_bc        = BitcodeCollector::is_bitcode_op(a);
+          auto idx          = op_count++;
+          auto functor_name = std::format("Op_{}", idx);
+          auto var_name     = std::format("op_{}", idx);
+          auto state_param  = std::format("op_{}_state", idx);
+          bool has_bc       = BitcodeCollector::is_bitcode_op(a);
 
           auto code = make_binary_op(a, accum_type, functor_name, var_name, state_param, has_bc);
 
@@ -168,8 +165,8 @@ std::string CubCall::source() const
           auto param_name = std::format("val_{}_ptr", idx);
 
           params.push_back(std::format("void* {}", param_name));
-          setup_lines.push_back(
-            std::format("accum_t {};\n    __builtin_memcpy(&{}, {}, sizeof(accum_t));", var_name, var_name, param_name));
+          setup_lines.push_back(std::format(
+            "accum_t {};\n    __builtin_memcpy(&{}, {}, sizeof(accum_t));", var_name, var_name, param_name));
           cub_args.push_back(var_name);
         }
       },
@@ -179,6 +176,7 @@ std::string CubCall::source() const
   // Assemble the complete source
   std::string src;
   src += "#include <cuda_runtime.h>\n";
+  src += "#include <cuda_fp16.h>\n";
   src += "#include <cuda/std/iterator>\n";
   src += "#include <cuda/std/functional>\n";
   src += "#include <cuda/functional>\n";
@@ -230,13 +228,18 @@ std::string CubCall::source() const
   return src;
 }
 
-CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_path, cccl_build_config* config,
-                               const char* ctk_path, const char* cccl_include_path) const
+CubCallResult CubCall::compile(
+  int cc_major,
+  int cc_minor,
+  const char* clang_path,
+  cccl_build_config* config,
+  const char* ctk_path,
+  const char* cccl_include_path) const
 {
   // 1. Configure compiler
-  auto jit_config          = clangjit::detectDefaultConfig();
-  jit_config.sm_version     = cc_major * 10 + cc_minor;
-  jit_config.verbose        = false;
+  auto jit_config             = clangjit::detectDefaultConfig();
+  jit_config.sm_version       = cc_major * 10 + cc_minor;
+  jit_config.verbose          = false;
   jit_config.entry_point_name = fn_name_;
 
   if (clang_path)
@@ -307,8 +310,8 @@ CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_pat
   uintptr_t unique_id = reinterpret_cast<uintptr_t>(this);
   BitcodeCollector bitcode(jit_config, unique_id);
 
-  int op_idx = 0;
-  int in_idx = 0;
+  int op_idx  = 0;
+  int in_idx  = 0;
   int out_idx = 0;
   for (const auto& arg : args_)
   {
@@ -361,5 +364,4 @@ CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_pat
 
   return CubCallResult{compiler, reinterpret_cast<void*>(fn), std::move(cubin)};
 }
-
 } // namespace clangjit::codegen

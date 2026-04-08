@@ -1400,7 +1400,7 @@ cdef extern from "cccl/c/segmented_reduce.h":
         cccl_iterator_t,
         cccl_op_t,
         cccl_value_t,
-        int, int, const char*, const char*, const char*, const char*
+        int, int, const char*, const char*, const char*, const char*, const char*
     ) nogil
 
     cdef CUresult cccl_device_segmented_reduce(
@@ -1442,6 +1442,7 @@ cdef class DeviceSegmentedReduceBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         memset(&self.build_data, 0, sizeof(cccl_device_segmented_reduce_build_result_t))
         with nogil:
@@ -1459,6 +1460,7 @@ cdef class DeviceSegmentedReduceBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(
@@ -1935,7 +1937,7 @@ cdef extern from "cccl/c/transform.h":
         cccl_iterator_t d_in,
         cccl_iterator_t d_out,
         cccl_op_t op,
-        int, int, const char *, const char *, const char *, const char *
+        int, int, const char *, const char *, const char *, const char *, const char *
     ) nogil
 
     cdef CUresult cccl_device_unary_transform(
@@ -1952,7 +1954,7 @@ cdef extern from "cccl/c/transform.h":
       cccl_iterator_t d_in2,
       cccl_iterator_t d_out,
       cccl_op_t op,
-      int, int, const char *, const char *, const char *, const char *
+      int, int, const char *, const char *, const char *, const char *, const char *
     ) nogil
 
     cdef CUresult cccl_device_binary_transform(
@@ -1988,6 +1990,7 @@ cdef class DeviceUnaryTransform:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         with nogil:
             status = cccl_device_unary_transform_build(
@@ -2001,6 +2004,7 @@ cdef class DeviceUnaryTransform:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError("Failed to build unary transform")
@@ -2062,6 +2066,7 @@ cdef class DeviceBinaryTransform:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         with nogil:
             status = cccl_device_binary_transform_build(
@@ -2076,6 +2081,7 @@ cdef class DeviceBinaryTransform:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError("Failed to build binary transform")
@@ -2273,8 +2279,8 @@ cdef extern from "cccl/c/binary_search.h":
         int cc
         void* cubin
         size_t cubin_size
-        CUlibrary library
-        CUkernel kernel
+        void* jit_compiler
+        void* binary_search_fn
 
     cdef CUresult cccl_device_binary_search_build(
         cccl_device_binary_search_build_result_t*,
@@ -2283,7 +2289,7 @@ cdef extern from "cccl/c/binary_search.h":
         cccl_iterator_t,
         cccl_iterator_t,
         cccl_op_t,
-        int, int, const char*, const char*, const char*, const char*
+        int, int, const char*, const char*, const char*, const char*, const char*
     ) nogil
 
     cdef CUresult cccl_device_binary_search(
@@ -2328,6 +2334,7 @@ cdef class DeviceBinarySearchBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         memset(&self.build_data, 0, sizeof(cccl_device_binary_search_build_result_t))
         with nogil:
@@ -2344,6 +2351,7 @@ cdef class DeviceBinarySearchBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(

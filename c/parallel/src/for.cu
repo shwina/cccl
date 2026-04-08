@@ -8,73 +8,208 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <cub/detail/choose_offset.cuh>
-#include <cub/grid/grid_even_share.cuh>
-#include <cub/util_device.cuh>
-
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
 #include <format>
-#include <type_traits>
-#include <vector>
+#include <string>
 
 #include <cccl/c/for.h>
-#include <cccl/c/types.h>
-#include <for/for_op_helper.h>
-#include <nvrtc/command_list.h>
-#include <nvrtc/ltoir_list_appender.h>
+#include <clangjit/codegen/bitcode.hpp>
+#include <clangjit/codegen/types.hpp>
+#include <clangjit/config.hpp>
+#include <clangjit/jit_compiler.hpp>
 #include <util/build_utils.h>
-#include <util/context.h>
-#include <util/errors.h>
-#include <util/types.h>
 
-struct op_wrapper;
-struct device_reduce_policy;
+using namespace clangjit;
+using namespace clangjit::codegen;
 
-using OffsetT = unsigned long long;
-static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be size_t");
+// d_in_0, num_items, op_0_state
+using for_fn_t = int (*)(void*, unsigned long long, void*);
 
-static cudaError_t
-Invoke(cccl_iterator_t d_in, size_t num_items, cccl_op_t op, int /*cc*/, CUfunction static_kernel, CUstream stream)
+static std::string make_for_source(cccl_iterator_t d_data, cccl_op_t op)
 {
-  cudaError error = cudaSuccess;
+  const auto data_type = get_type_name(d_data.value_type.type);
+  const bool has_bc    = BitcodeCollector::is_bitcode_op(op);
+  const bool stateful  = (op.type == CCCL_STATEFUL);
+  const std::string op_name(op.name ? op.name : "op");
 
-  if (num_items == 0)
+  std::string src;
+  src += "#include <cuda_runtime.h>\n";
+  src += "#include <cub/agent/agent_for.cuh>\n";
+  src += "#include <climits>\n\n";
+
+  src += "#ifdef _WIN32\n"
+         "#define EXPORT __declspec(dllexport)\n"
+         "#else\n"
+         "#define EXPORT __attribute__((visibility(\"default\")))\n"
+         "#endif\n\n";
+
+  // Define the iterator type — always a raw pointer for pointer inputs
+  src += std::format("using in_0_it_t = {}*;\n\n", data_type);
+
+  // User op forward declaration or inline source
+  if (op.code_type == CCCL_OP_CPP_SOURCE && op.code && op.code_size > 0)
   {
-    return error;
+    src += std::string(op.code, op.code_size);
+    src += "\n";
+  }
+  else if (has_bc)
+  {
+    if (stateful)
+    {
+      src += std::format("extern \"C\" __device__ void {}(void* state, {}* input);\n\n", op_name, data_type);
+    }
+    else
+    {
+      src += std::format("extern \"C\" __device__ void {}({}* input);\n\n", op_name, data_type);
+    }
   }
 
-  auto for_kernel_state = make_for_kernel_state(op, d_in);
-
-  void* args[] = {&num_items, for_kernel_state.get()};
-
-  const unsigned int thread_count = 256;
-  const size_t items_per_block    = 512;
-  const size_t block_sz           = cuda::ceil_div(num_items, items_per_block);
-
-  if (block_sz > std::numeric_limits<unsigned int>::max())
+  // user_op_t functor
+  if (stateful)
   {
-    return cudaErrorInvalidValue;
+    src += "struct user_op_t {\n";
+    src += "  void* state;\n";
+    src += std::format(
+      "  __device__ __forceinline__ void operator()({}* input) const {{ {}(state, input); }}\n", data_type, op_name);
+    src += "};\n\n";
   }
-  const unsigned int block_count = static_cast<unsigned int>(block_sz);
+  else
+  {
+    src += "struct user_op_t {\n";
+    src += std::format(
+      "  __device__ __forceinline__ void operator()({}* input) const {{ {}(input); }}\n", data_type, op_name);
+    src += "};\n\n";
+  }
 
-  check(cuLaunchKernel(static_kernel, block_count, 1, 1, thread_count, 1, 1, 0, stream, args, 0));
+  // Policy
+  src += "using OffsetT = unsigned long long;\n";
+  src += "using policy_dim_t = cub::detail::for_each::policy_t<256, 2>;\n";
+  src += "struct device_for_policy {\n"
+         "  struct ActivePolicy {\n"
+         "    using for_policy_t = policy_dim_t;\n"
+         "  };\n"
+         "};\n\n";
 
-  // Check for failure to launch
-  error = CubDebug(cudaPeekAtLastError());
+  // Template kernel
+  src += std::format(
+    R"(template<typename DataIt, typename OpT>
+CUB_DETAIL_KERNEL_ATTRIBUTES
+__launch_bounds__(device_for_policy::ActivePolicy::for_policy_t::block_threads)
+void for_kernel(DataIt d_data, OffsetT num_items, OpT user_op)
+{{
+  auto agent_op = [&user_op, &d_data](OffsetT idx) {{
+    user_op(d_data + idx);
+  }};
+  using active_policy_t = device_for_policy::ActivePolicy::for_policy_t;
+  using agent_t = cub::detail::for_each::agent_block_striped_t<active_policy_t, OffsetT, decltype(agent_op)>;
+  constexpr auto block_threads  = active_policy_t::block_threads;
+  constexpr auto items_per_tile = active_policy_t::items_per_thread * block_threads;
+  const auto tile_base     = static_cast<OffsetT>(blockIdx.x) * items_per_tile;
+  const auto num_remaining = num_items - tile_base;
+  const auto items_in_tile = static_cast<OffsetT>(num_remaining < items_per_tile ? num_remaining : items_per_tile);
+  if (items_in_tile == items_per_tile) {{
+    agent_t{{{{tile_base, agent_op}}}}.template consume_tile<true>(items_per_tile, block_threads);
+  }} else {{
+    agent_t{{{{tile_base, agent_op}}}}.template consume_tile<false>(items_in_tile, block_threads);
+  }}
+}}
 
-  return error;
+)");
+
+  // Host wrapper
+  src += "extern \"C\" EXPORT int cccl_jit_for(\n"
+         "    void* d_in_0, unsigned long long num_items, void* op_0_state\n"
+         ") {\n";
+  src += "    in_0_it_t in_0 = static_cast<in_0_it_t>(d_in_0);\n";
+  if (stateful)
+  {
+    src += "    user_op_t op_0{op_0_state};\n";
+  }
+  else
+  {
+    src += "    user_op_t op_0{};\n";
+  }
+  src += "    if (num_items == 0) return 0;\n";
+  src += "    constexpr unsigned long long items_per_block = 512ULL;\n";
+  src += "    unsigned long long block_sz = (num_items + items_per_block - 1) / items_per_block;\n";
+  src += "    if (block_sz > (unsigned long long)UINT_MAX) return (int)cudaErrorInvalidValue;\n";
+  src += "    for_kernel<<<(unsigned int)block_sz, 256>>>(in_0, num_items, op_0);\n";
+  src += "    return (int)cudaPeekAtLastError();\n";
+  src += "}\n";
+
+  return src;
 }
 
-struct for_each_wrapper;
-
-static std::string get_device_for_kernel_name()
+// Set up JITCompiler config — mirrors binary_search.cu logic
+static CompilerConfig make_for_jit_config(
+  int cc_major,
+  int cc_minor,
+  const char* clang_path,
+  cccl_build_config* config,
+  const char* ctk_root,
+  const char* cccl_include_path)
 {
-  std::string offset_t;
-  std::string function_op_t;
-  check(cccl_type_name_from_nvrtc<for_each_wrapper>(&function_op_t));
-  check(cccl_type_name_from_nvrtc<OffsetT>(&offset_t));
+  auto jit_config             = detectDefaultConfig();
+  jit_config.sm_version       = cc_major * 10 + cc_minor;
+  jit_config.verbose          = false;
+  jit_config.entry_point_name = "cccl_jit_for";
 
-  return std::format(
-    "cub::detail::for_each::static_kernel<device_for_policy_selector, {0}, {1}>", offset_t, function_op_t);
+  if (clang_path && clang_path[0] != '\0')
+  {
+    jit_config.clang_headers_path = clang_path;
+  }
+  if (ctk_root && ctk_root[0] != '\0')
+  {
+    jit_config.cuda_toolkit_path = ctk_root;
+    jit_config.library_paths.clear();
+    for (const char* subdir : {"lib64", "lib"})
+    {
+      auto candidate = std::filesystem::path(ctk_root) / subdir;
+      if (std::filesystem::exists(candidate))
+      {
+        jit_config.library_paths.push_back(candidate.string());
+      }
+    }
+  }
+  if (cccl_include_path && cccl_include_path[0] != '\0')
+  {
+    jit_config.cccl_include_path = cccl_include_path;
+    if (jit_config.clangjit_include_path.empty()
+        || !std::filesystem::exists(jit_config.clangjit_include_path + "/clangjit/cuda_minimal"))
+    {
+      auto parent = std::filesystem::path(cccl_include_path).parent_path().string();
+      if (std::filesystem::exists(parent + "/clangjit/cuda_minimal"))
+      {
+        jit_config.clangjit_include_path = parent;
+      }
+    }
+  }
+  if (config)
+  {
+    for (size_t i = 0; i < config->num_extra_include_dirs; ++i)
+    {
+      jit_config.include_paths.push_back(config->extra_include_dirs[i]);
+    }
+    for (size_t i = 0; i < config->num_extra_compile_flags; ++i)
+    {
+      std::string flag = config->extra_compile_flags[i];
+      if (flag.substr(0, 2) == "-D")
+      {
+        auto eq = flag.find('=', 2);
+        if (eq != std::string::npos)
+        {
+          jit_config.macro_definitions[flag.substr(2, eq - 2)] = flag.substr(eq + 1);
+        }
+        else
+        {
+          jit_config.macro_definitions[flag.substr(2)] = "";
+        }
+      }
+    }
+  }
+  return jit_config;
 }
 
 CUresult cccl_device_for_build_ex(
@@ -83,99 +218,92 @@ CUresult cccl_device_for_build_ex(
   cccl_op_t op,
   int cc_major,
   int cc_minor,
-  const char* cub_path,
-  const char* thrust_path,
+  const char* /*cub_path*/,
+  const char* /*thrust_path*/,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config)
 try
 {
-  if (d_data.type == cccl_iterator_kind_t::CCCL_ITERATOR)
+  std::string cccl_include_str  = cccl::detail::parse_cccl_include_path(libcudacxx_path);
+  std::string ctk_root_str      = cccl::detail::parse_ctk_root(ctk_path);
+  const char* cccl_include_path = cccl_include_str.empty() ? nullptr : cccl_include_str.c_str();
+  const char* ctk_root          = ctk_root_str.empty() ? nullptr : ctk_root_str.c_str();
+
+  auto jit_config = make_for_jit_config(cc_major, cc_minor, clang_path, config, ctk_root, cccl_include_path);
+
+  // Collect bitcode from op
+  uintptr_t unique_id = reinterpret_cast<uintptr_t>(build_ptr);
+  BitcodeCollector bitcode(jit_config, unique_id);
+  bitcode.add_op(op, "op_0");
+
+  // Generate source
+  std::string cuda_source = make_for_source(d_data, op);
+
+  // Compile
+  auto* compiler = new JITCompiler(jit_config);
+  if (!compiler->compile(cuda_source))
   {
-    throw std::runtime_error(std::string("Iterators are unsupported in for_each currently"));
+    std::string err = compiler->getLastError();
+    delete compiler;
+    bitcode.cleanup();
+    throw std::runtime_error("for compilation failed: " + err);
+  }
+  bitcode.cleanup();
+
+  // Extract function pointer
+  using fn_t = int (*)(void*, ...);
+  auto fn    = compiler->getFunction<fn_t>("cccl_jit_for");
+  if (!fn)
+  {
+    std::string err = compiler->getLastError();
+    delete compiler;
+    throw std::runtime_error("for function lookup failed: " + err);
   }
 
-  const char* name = "test";
+  auto cubin = compiler->getCubin();
 
-  const int cc = cc_major * 10 + cc_minor;
-
-  const std::string for_kernel_name   = get_device_for_kernel_name();
-  const std::string device_for_kernel = get_for_kernel(op, d_data);
-
-  const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
-
-  std::vector<const char*> args = {
-    arch.c_str(), cub_path, thrust_path, libcudacxx_path, ctk_path, "-rdc=true", "-dlto", "-DCUB_DISABLE_CDP"};
-
-  cccl::detail::extend_args_with_build_config(args, config);
-
-  constexpr size_t num_lto_args   = 2;
-  const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
-
-  std::string lowered_name;
-
-  // Collect all LTO-IRs to be linked
-  nvrtc_linkable_list linkable_list;
-  nvrtc_linkable_list_appender appender{linkable_list};
-
-  // Add operation if it's LTO-IR (C++ source not yet supported in for)
-  appender.append_operation(op);
-
-  // Add iterator definitions if present
-  if (cccl_iterator_kind_t::CCCL_ITERATOR == d_data.type)
+  build_ptr->cc         = cc_major * 10 + cc_minor;
+  build_ptr->cubin      = nullptr;
+  build_ptr->cubin_size = 0;
+  if (!cubin.empty())
   {
-    appender.append_operation(d_data.advance);
-    appender.append_operation(d_data.dereference);
+    auto* cubin_copy = new char[cubin.size()];
+    std::memcpy(cubin_copy, cubin.data(), cubin.size());
+    build_ptr->cubin      = cubin_copy;
+    build_ptr->cubin_size = cubin.size();
   }
-
-  nvrtc_link_result result =
-    begin_linking_nvrtc_program(num_lto_args, lopts)
-      ->add_program(nvrtc_translation_unit{device_for_kernel, name})
-      ->add_expression({for_kernel_name})
-      ->compile_program({args.data(), args.size()})
-      ->get_name({for_kernel_name, lowered_name})
-      ->link_program()
-      ->add_link_list(linkable_list)
-      ->finalize_program();
-
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(&build_ptr->static_kernel, build_ptr->library, lowered_name.c_str()));
-
-  build_ptr->cc         = cc;
-  build_ptr->cubin      = (void*) result.data.release();
-  build_ptr->cubin_size = result.size;
+  build_ptr->jit_compiler = compiler;
+  build_ptr->for_fn       = reinterpret_cast<void*>(fn);
 
   return CUDA_SUCCESS;
 }
-catch (...)
+catch (const std::exception& exc)
 {
+  fprintf(stderr, "\nEXCEPTION in cccl_device_for_build(): %s\n", exc.what());
   return CUDA_ERROR_UNKNOWN;
 }
 
 CUresult cccl_device_for(
-  cccl_device_for_build_result_t build, cccl_iterator_t d_data, uint64_t num_items, cccl_op_t op, CUstream stream)
+  cccl_device_for_build_result_t build, cccl_iterator_t d_data, uint64_t num_items, cccl_op_t op, CUstream /*stream*/)
 {
-  bool pushed    = false;
-  CUresult error = CUDA_SUCCESS;
-
   try
   {
-    pushed           = try_push_context();
-    auto exec_status = Invoke(d_data, num_items, op, build.cc, (CUfunction) build.static_kernel, stream);
-    error            = static_cast<CUresult>(exec_status);
-  }
-  catch (...)
-  {
-    error = CUDA_ERROR_UNKNOWN;
-  }
+    auto fn = reinterpret_cast<for_fn_t>(build.for_fn);
+    if (!fn)
+    {
+      return CUDA_ERROR_INVALID_VALUE;
+    }
 
-  if (pushed)
-  {
-    CUcontext dummy;
-    cuCtxPopCurrent(&dummy);
+    int status = fn(d_data.state, num_items, op.state);
+    return (status == 0) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
   }
-
-  return error;
+  catch (const std::exception& exc)
+  {
+    fprintf(stderr, "\nEXCEPTION in cccl_device_for(): %s\n", exc.what());
+    return CUDA_ERROR_UNKNOWN;
+  }
 }
 
 CUresult cccl_device_for_build(
@@ -187,10 +315,11 @@ CUresult cccl_device_for_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path)
+  const char* ctk_path,
+  const char* clang_path)
 {
   return cccl_device_for_build_ex(
-    build, d_data, op, cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, ctk_path, nullptr);
+    build, d_data, op, cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, ctk_path, clang_path, nullptr);
 }
 
 CUresult cccl_device_for_cleanup(cccl_device_for_build_result_t* build_ptr)
@@ -201,12 +330,23 @@ try
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
-  check(cuLibraryUnload(build_ptr->library));
+  if (build_ptr->jit_compiler)
+  {
+    delete static_cast<JITCompiler*>(build_ptr->jit_compiler);
+    build_ptr->jit_compiler = nullptr;
+  }
+  if (build_ptr->cubin)
+  {
+    delete[] static_cast<char*>(build_ptr->cubin);
+    build_ptr->cubin = nullptr;
+  }
+  build_ptr->cubin_size = 0;
+  build_ptr->for_fn     = nullptr;
 
   return CUDA_SUCCESS;
 }
-catch (...)
+catch (const std::exception& exc)
 {
+  fprintf(stderr, "\nEXCEPTION in cccl_device_for_cleanup(): %s\n", exc.what());
   return CUDA_ERROR_UNKNOWN;
 }

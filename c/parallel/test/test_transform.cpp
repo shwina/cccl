@@ -38,14 +38,14 @@ struct transform_build
   template <typename... Ts>
   CUresult operator()(BuildResultT* build_ptr, IterT input, IterT output, uint64_t, Ts... rest) const noexcept
   {
-    return cccl_device_unary_transform_build(build_ptr, input, output, rest...);
+    return cccl_device_unary_transform_build(build_ptr, input, output, rest..., nullptr);
   }
 
   template <typename... Ts>
   CUresult
   operator()(BuildResultT* build_ptr, IterT input1, IterT input2, IterT output, uint64_t, Ts... rest) const noexcept
   {
-    return cccl_device_binary_transform_build(build_ptr, input1, input2, output, rest...);
+    return cccl_device_binary_transform_build(build_ptr, input1, input2, output, rest..., nullptr);
   }
 };
 
@@ -121,7 +121,8 @@ C2H_TEST("Transform generates UBLKCP on SM90", "[transform][ublkcp]")
       build_info.get_cub_path(),
       build_info.get_thrust_path(),
       build_info.get_libcudacxx_path(),
-      build_info.get_ctk_path()));
+      build_info.get_ctk_path(),
+      nullptr));
 
   std::string sass = inspect_sass(build.cubin, build.cubin_size);
   CHECK(sass.find("UBLKCP") != std::string::npos);
@@ -140,7 +141,8 @@ C2H_TEST("Transform generates UBLKCP on SM90", "[transform][ublkcp]")
       build_info.get_cub_path(),
       build_info.get_thrust_path(),
       build_info.get_libcudacxx_path(),
-      build_info.get_ctk_path()));
+      build_info.get_ctk_path(),
+      nullptr));
 
   sass = inspect_sass(build.cubin, build.cubin_size);
   CHECK(sass.find("UBLKCP") != std::string::npos);

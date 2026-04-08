@@ -75,7 +75,19 @@ struct binary_search_build
     const char* ctk_path) const noexcept
   {
     return cccl_device_binary_search_build(
-      build_ptr, mode, data, values, out, op, cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, ctk_path);
+      build_ptr,
+      mode,
+      data,
+      values,
+      out,
+      op,
+      cc_major,
+      cc_minor,
+      cub_path,
+      thrust_path,
+      libcudacxx_path,
+      ctk_path,
+      nullptr);
   }
 
   static constexpr bool should_check_sass(int)

@@ -65,7 +65,8 @@ struct segmented_reduce_build
       cub_path,
       thrust_path,
       libcudacxx_path,
-      ctk_path);
+      ctk_path,
+      nullptr);
   }
 };
 

@@ -1,10 +1,9 @@
-#include <clangjit/codegen/types.hpp>
-
 #include <format>
+
+#include <clangjit/codegen/types.hpp>
 
 namespace clangjit::codegen
 {
-
 std::string get_type_name(cccl_type_enum type)
 {
   switch (type)
@@ -25,6 +24,8 @@ std::string get_type_name(cccl_type_enum type)
       return "unsigned int";
     case CCCL_UINT64:
       return "unsigned long long";
+    case CCCL_FLOAT16:
+      return "__half";
     case CCCL_FLOAT32:
       return "float";
     case CCCL_FLOAT64:
@@ -58,5 +59,4 @@ std::string resolve_type(cccl_type_info info, const char* fallback_alias, std::s
   out_preamble += make_storage_type(fallback_alias, info.size, info.alignment);
   return fallback_alias;
 }
-
 } // namespace clangjit::codegen

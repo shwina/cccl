@@ -26,11 +26,8 @@ typedef struct cccl_device_transform_build_result_t
   int cc;
   void* cubin;
   size_t cubin_size;
-  CUlibrary library;
-  CUkernel transform_kernel;
-  int loaded_bytes_per_iteration;
-  void* runtime_policy;
-  void* cache;
+  void* jit_compiler;
+  void* transform_fn;
 } cccl_device_transform_build_result_t;
 
 CCCL_C_API CUresult cccl_device_unary_transform_build(
@@ -43,7 +40,8 @@ CCCL_C_API CUresult cccl_device_unary_transform_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path);
+  const char* ctk_path,
+  const char* clang_path);
 
 // Extended version with build configuration
 CCCL_C_API CUresult cccl_device_unary_transform_build_ex(
@@ -57,6 +55,7 @@ CCCL_C_API CUresult cccl_device_unary_transform_build_ex(
   const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config);
 
 CCCL_C_API CUresult cccl_device_unary_transform(
@@ -78,7 +77,8 @@ CCCL_C_API CUresult cccl_device_binary_transform_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path);
+  const char* ctk_path,
+  const char* clang_path);
 
 // Extended version with build configuration
 CCCL_C_API CUresult cccl_device_binary_transform_build_ex(
@@ -93,6 +93,7 @@ CCCL_C_API CUresult cccl_device_binary_transform_build_ex(
   const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config);
 
 CCCL_C_API CUresult cccl_device_binary_transform(

@@ -27,10 +27,8 @@ typedef struct cccl_device_segmented_reduce_build_result_t
   int cc;
   void* cubin;
   size_t cubin_size;
-  CUlibrary library;
-  uint64_t accumulator_size;
-  CUkernel segmented_reduce_kernel;
-  void* runtime_policy;
+  void* jit_compiler;
+  void* segmented_reduce_fn;
 } cccl_device_segmented_reduce_build_result_t;
 
 // TODO return a union of nvtx/cuda/nvrtc errors or a string?
@@ -47,7 +45,8 @@ CCCL_C_API CUresult cccl_device_segmented_reduce_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path);
+  const char* ctk_path,
+  const char* clang_path);
 
 // Extended version with build configuration
 CCCL_C_API CUresult cccl_device_segmented_reduce_build_ex(
@@ -64,6 +63,7 @@ CCCL_C_API CUresult cccl_device_segmented_reduce_build_ex(
   const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config);
 
 CCCL_C_API CUresult cccl_device_segmented_reduce(

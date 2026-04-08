@@ -39,7 +39,7 @@ struct for_each_build
   template <typename... Ts>
   CUresult operator()(BuildResultT* build_ptr, cccl_iterator_t input, uint64_t, cccl_op_t op, Ts... args) const noexcept
   {
-    return cccl_device_for_build(build_ptr, input, op, args...);
+    return cccl_device_for_build(build_ptr, input, op, args..., nullptr);
   }
 };
 
@@ -286,6 +286,7 @@ C2H_TEST("For works with C++ source operations using custom headers", "[for]")
       build_info.get_thrust_path(),
       build_info.get_libcudacxx_path(),
       build_info.get_ctk_path(),
+      nullptr,
       &config));
 
   // Execute the for_each
