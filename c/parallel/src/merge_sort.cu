@@ -8,496 +8,307 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <cub/detail/choose_offset.cuh>
-#include <cub/detail/launcher/cuda_driver.cuh>
-#include <cub/detail/ptx-json-parser.cuh>
-#include <cub/device/device_merge_sort.cuh>
-
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
 #include <format>
-#include <vector>
+#include <string>
 
-#include "kernels/iterators.h"
-#include "kernels/operators.h"
-#include "util/context.h"
-#include "util/indirect_arg.h"
-#include "util/tuning.h"
-#include "util/types.h"
 #include <cccl/c/merge_sort.h>
-#include <nvrtc/command_list.h>
-#include <nvrtc/ltoir_list_appender.h>
+#include <clangjit/codegen/bitcode.hpp>
+#include <clangjit/codegen/iterators.hpp>
+#include <clangjit/codegen/operators.hpp>
+#include <clangjit/codegen/types.hpp>
+#include <clangjit/config.hpp>
+#include <clangjit/jit_compiler.hpp>
 #include <util/build_utils.h>
 
-struct op_wrapper;
-struct device_merge_sort_policy;
-using OffsetT = unsigned long long;
-static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "OffsetT must be unsigned long long");
+using namespace clangjit;
+using namespace clangjit::codegen;
 
-struct input_keys_iterator_state_t;
-struct input_items_iterator_state_t;
-struct output_keys_iterator_t;
-struct output_items_iterator_t;
+// All builds use the same 9-arg function signature.
+// Keys-only builds ignore d_in_items / d_out_items (passed as nullptr).
+using sort_fn_t = int (*)(void*, size_t*, void*, void*, void*, void*, unsigned long long, void*, void*);
 
-namespace merge_sort
+static bool is_null_items(cccl_iterator_t it)
 {
-struct merge_sort_runtime_tuning_policy
-{
-  cub::detail::RuntimeMergeSortAgentPolicy merge_sort;
+  return it.type == CCCL_POINTER && it.state == nullptr;
+}
 
-  auto MergeSort() const
+static CompilerConfig make_merge_sort_jit_config(
+  const char* entry_name,
+  int cc_major,
+  int cc_minor,
+  const char* clang_path,
+  cccl_build_config* config,
+  const char* ctk_root,
+  const char* cccl_include_path)
+{
+  auto jit_config             = detectDefaultConfig();
+  jit_config.sm_version       = cc_major * 10 + cc_minor;
+  jit_config.verbose          = false;
+  jit_config.entry_point_name = entry_name;
+
+  if (clang_path && clang_path[0] != '\0')
   {
-    return merge_sort;
+    jit_config.clang_headers_path = clang_path;
+  }
+  if (ctk_root && ctk_root[0] != '\0')
+  {
+    jit_config.cuda_toolkit_path = ctk_root;
+    jit_config.library_paths.clear();
+    for (const char* subdir : {"lib64", "lib"})
+    {
+      auto candidate = std::filesystem::path(ctk_root) / subdir;
+      if (std::filesystem::exists(candidate))
+      {
+        jit_config.library_paths.push_back(candidate.string());
+      }
+    }
+  }
+  if (cccl_include_path && cccl_include_path[0] != '\0')
+  {
+    jit_config.cccl_include_path = cccl_include_path;
+    if (jit_config.clangjit_include_path.empty()
+        || !std::filesystem::exists(jit_config.clangjit_include_path + "/clangjit/cuda_minimal"))
+    {
+      auto parent = std::filesystem::path(cccl_include_path).parent_path().string();
+      if (std::filesystem::exists(parent + "/clangjit/cuda_minimal"))
+      {
+        jit_config.clangjit_include_path = parent;
+      }
+    }
+  }
+  if (config)
+  {
+    for (size_t i = 0; i < config->num_extra_include_dirs; ++i)
+    {
+      jit_config.include_paths.push_back(config->extra_include_dirs[i]);
+    }
+    for (size_t i = 0; i < config->num_extra_compile_flags; ++i)
+    {
+      std::string flag = config->extra_compile_flags[i];
+      if (flag.substr(0, 2) == "-D")
+      {
+        auto eq = flag.find('=', 2);
+        if (eq != std::string::npos)
+        {
+          jit_config.macro_definitions[flag.substr(2, eq - 2)] = flag.substr(eq + 1);
+        }
+        else
+        {
+          jit_config.macro_definitions[flag.substr(2)] = "";
+        }
+      }
+    }
+  }
+  return jit_config;
+}
+
+// ---------------------------------------------------------------------------
+// Source generation
+// ---------------------------------------------------------------------------
+
+static std::string make_merge_sort_source(cccl_iterator_t d_in_keys, cccl_iterator_t d_in_items, cccl_op_t op)
+{
+  const bool has_items = !is_null_items(d_in_items);
+
+  // Resolve key type (uses storage_t struct for unknown types)
+  std::string key_preamble;
+  std::string key_type = resolve_type(d_in_keys.value_type, "key_t", key_preamble);
+
+  // Resolve item type
+  std::string item_preamble;
+  std::string item_type;
+  if (has_items)
+  {
+    item_type = resolve_type(d_in_items.value_type, "item_t", item_preamble);
   }
 
-  using MergeSortPolicy = cub::detail::RuntimeMergeSortAgentPolicy;
-  using MaxPolicy       = merge_sort_runtime_tuning_policy;
+  // Key input iterator (pointer or custom struct with state)
+  auto key_in_code = make_input_iterator(d_in_keys, key_type, key_type, "in_keys_t", "in_keys", "d_in_keys");
 
-  template <typename F>
-  cudaError_t Invoke(int, F& op)
+  // Item input iterator
+  IteratorCode item_in_code;
+  if (has_items)
   {
-    return op.template Invoke<merge_sort_runtime_tuning_policy>(*this);
+    item_in_code = make_input_iterator(d_in_items, item_type, item_type, "in_items_t", "in_items", "d_in_items");
   }
-};
 
-enum class merge_sort_iterator_t
-{
-  input_keys   = 0,
-  input_items  = 1,
-  output_keys  = 2,
-  output_items = 3
-};
+  // Comparison operator (returns bool)
+  const bool has_bc = BitcodeCollector::is_bitcode_op(op);
+  auto cmp_code     = make_comparison_op(op, key_type, "cmp_op_t", "cmp_op", "op_state", has_bc);
 
-template <typename StorageT = storage_t>
-std::string get_iterator_name(cccl_iterator_t iterator, merge_sort_iterator_t which_iterator)
-{
-  if (iterator.type == cccl_iterator_kind_t::CCCL_POINTER)
+  std::string src;
+  src += "#include <cuda_runtime.h>\n";
+  src += "#include <cuda_fp16.h>\n";
+  src += "#include <cuda/std/iterator>\n";
+  src += "#include <cuda/std/functional>\n";
+  src += "#include <cuda/functional>\n";
+  src += "#include <cub/device/device_merge_sort.cuh>\n\n";
+
+  src += key_preamble;
+  if (has_items)
   {
-    if (iterator.state == nullptr)
-    {
-      return "cub::NullType*";
-    }
-    else
-    {
-      return cccl_type_enum_to_name<StorageT>(iterator.value_type.type, true);
-    }
+    src += item_preamble;
+  }
+  src += key_in_code.preamble;
+  if (has_items)
+  {
+    src += item_in_code.preamble;
+  }
+  src += cmp_code.preamble;
+
+  src += "#ifdef _WIN32\n"
+         "#define EXPORT __declspec(dllexport)\n"
+         "#else\n"
+         "#define EXPORT __attribute__((visibility(\"default\")))\n"
+         "#endif\n\n";
+
+  // Unified 9-arg signature for both keys-only and pairs builds.
+  // Keys-only: d_in_items / d_out_items are passed as nullptr and ignored.
+  src +=
+    "extern \"C\" EXPORT int cccl_jit_merge_sort(\n"
+    "    void* d_temp_storage,\n"
+    "    size_t* temp_storage_bytes,\n"
+    "    void* d_in_keys,\n"
+    "    void* d_in_items,\n"
+    "    void* d_out_keys,\n"
+    "    void* d_out_items,\n"
+    "    unsigned long long num_items,\n"
+    "    void* op_state,\n"
+    "    void* stream)\n"
+    "{\n";
+
+  // Set up key input iterator
+  src += "    " + key_in_code.setup_code + "\n";
+
+  // Output key pointer (merge sort output is always a raw pointer)
+  src += std::format("    {}* out_keys = static_cast<{}*>(d_out_keys);\n", key_type, key_type);
+
+  if (has_items)
+  {
+    src += "    " + item_in_code.setup_code + "\n";
+    src += std::format("    {}* out_items = static_cast<{}*>(d_out_items);\n", item_type, item_type);
   }
   else
   {
-    std::string iterator_t;
-    switch (which_iterator)
-    {
-      case merge_sort_iterator_t::input_keys: {
-        check(cccl_type_name_from_nvrtc<input_keys_iterator_state_t>(&iterator_t));
-        break;
-      }
-      case merge_sort_iterator_t::input_items: {
-        check(cccl_type_name_from_nvrtc<input_items_iterator_state_t>(&iterator_t));
-        break;
-      }
-      case merge_sort_iterator_t::output_keys: {
-        check(cccl_type_name_from_nvrtc<output_keys_iterator_t>(&iterator_t));
-        break;
-      }
-      case merge_sort_iterator_t::output_items: {
-        check(cccl_type_name_from_nvrtc<output_items_iterator_t>(&iterator_t));
-        break;
-      }
-    }
-
-    return iterator_t;
+    src += "    (void)d_in_items;\n";
+    src += "    (void)d_out_items;\n";
   }
+
+  // Set up comparison op
+  src += "    " + cmp_code.setup_code + "\n\n";
+
+  if (has_items)
+  {
+    src += "    cudaError_t err = cub::DeviceMergeSort::SortPairsCopy(\n"
+           "        d_temp_storage, *temp_storage_bytes,\n"
+           "        in_keys, in_items, out_keys, out_items,\n"
+           "        (unsigned long long)num_items, cmp_op,\n"
+           "        (cudaStream_t)stream);\n";
+  }
+  else
+  {
+    src += "    cudaError_t err = cub::DeviceMergeSort::SortKeysCopy(\n"
+           "        d_temp_storage, *temp_storage_bytes,\n"
+           "        in_keys, out_keys,\n"
+           "        (unsigned long long)num_items, cmp_op,\n"
+           "        (cudaStream_t)stream);\n";
+  }
+
+  src += "    return (int)err;\n}\n";
+
+  return src;
 }
 
-std::string get_merge_sort_kernel_name(
-  std::string_view kernel_name,
-  cccl_iterator_t input_keys_it,
-  cccl_iterator_t input_items_it,
-  cccl_iterator_t output_keys_it,
-  cccl_iterator_t output_items_it)
-{
-  std::string chained_policy_t;
-  check(cccl_type_name_from_nvrtc<device_merge_sort_policy>(&chained_policy_t));
-
-  const std::string input_keys_iterator_t = get_iterator_name(input_keys_it, merge_sort_iterator_t::input_keys);
-  const std::string input_items_iterator_t =
-    get_iterator_name<items_storage_t>(input_items_it, merge_sort_iterator_t::input_items);
-  const std::string output_keys_iterator_t = get_iterator_name(output_keys_it, merge_sort_iterator_t::output_keys);
-  const std::string output_items_iterator_t =
-    get_iterator_name<items_storage_t>(output_items_it, merge_sort_iterator_t::output_items);
-
-  std::string offset_t;
-  check(cccl_type_name_from_nvrtc<OffsetT>(&offset_t));
-
-  std::string compare_op_t;
-  check(cccl_type_name_from_nvrtc<op_wrapper>(&compare_op_t));
-
-  const std::string key_t = cccl_type_enum_to_name(output_keys_it.value_type.type);
-  const std::string value_t =
-    output_items_it.type == cccl_iterator_kind_t::CCCL_POINTER && output_items_it.state == nullptr
-      ? "cub::NullType"
-      : cccl_type_enum_to_name<items_storage_t>(output_items_it.value_type.type);
-
-  return std::format(
-    "cub::detail::merge_sort::{0}<{1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, device_merge_sort_vsmem_helper>",
-    kernel_name,
-    chained_policy_t,
-    input_keys_iterator_t,
-    input_items_iterator_t,
-    output_keys_iterator_t,
-    output_items_iterator_t,
-    offset_t,
-    compare_op_t,
-    key_t,
-    value_t);
-}
-
-std::string get_partition_kernel_name(cccl_iterator_t output_keys_it)
-{
-  const std::string output_keys_iterator_t = get_iterator_name(output_keys_it, merge_sort_iterator_t::output_keys);
-
-  std::string offset_t;
-  check(cccl_type_name_from_nvrtc<OffsetT>(&offset_t));
-
-  std::string compare_op_t;
-  check(cccl_type_name_from_nvrtc<op_wrapper>(&compare_op_t));
-
-  std::string key_t = cccl_type_enum_to_name(output_keys_it.value_type.type);
-
-  return std::format(
-    "cub::detail::merge_sort::DeviceMergeSortPartitionKernel<{0}, {1}, {2}, {3}>",
-    output_keys_iterator_t,
-    offset_t,
-    compare_op_t,
-    key_t);
-}
-
-struct merge_sort_kernel_source
-{
-  cccl_device_merge_sort_build_result_t& build;
-
-  CUkernel MergeSortBlockSortKernel() const
-  {
-    return build.block_sort_kernel;
-  }
-
-  CUkernel MergeSortPartitionKernel() const
-  {
-    return build.partition_kernel;
-  }
-
-  CUkernel MergeSortMergeKernel() const
-  {
-    return build.merge_kernel;
-  }
-
-  std::size_t KeySize() const
-  {
-    return build.key_type.size;
-  }
-
-  std::size_t ValueSize() const
-  {
-    return build.item_type.size;
-  }
-};
-
-struct dynamic_vsmem_helper_t
-{
-  template <typename PolicyT, typename... Ts>
-  static ::cuda::std::size_t BlockSortVSMemPerBlock(PolicyT /*policy*/)
-  {
-    return 0;
-  }
-
-  template <typename PolicyT, typename... Ts>
-  static ::cuda::std::size_t MergeVSMemPerBlock(PolicyT /*policy*/)
-  {
-    return 0;
-  }
-
-  template <typename PolicyT, typename... Ts>
-  static int BlockThreads(PolicyT policy)
-  {
-    return policy.BlockThreads();
-  }
-
-  template <typename PolicyT, typename... Ts>
-  static int ItemsPerTile(PolicyT policy)
-  {
-    return policy.ItemsPerTile();
-  }
-};
-} // namespace merge_sort
+// ---------------------------------------------------------------------------
+// Build
+// ---------------------------------------------------------------------------
 
 CUresult cccl_device_merge_sort_build_ex(
   cccl_device_merge_sort_build_result_t* build_ptr,
-  cccl_iterator_t input_keys_it,
-  cccl_iterator_t input_items_it,
-  cccl_iterator_t output_keys_it,
-  cccl_iterator_t output_items_it,
+  cccl_iterator_t d_in_keys,
+  cccl_iterator_t d_in_items,
+  cccl_iterator_t d_out_keys,
+  cccl_iterator_t d_out_items,
   cccl_op_t op,
   int cc_major,
   int cc_minor,
-  const char* cub_path,
-  const char* thrust_path,
+  const char* /*cub_path*/,
+  const char* /*thrust_path*/,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config)
 try
 {
-  const char* name = "test";
+  if (d_out_keys.type == CCCL_ITERATOR || d_out_items.type == CCCL_ITERATOR)
+  {
+    fprintf(stderr, "\nERROR in cccl_device_merge_sort_build(): merge sort output cannot be an iterator\n");
+    return CUDA_ERROR_UNKNOWN;
+  }
 
-  const int cc = cc_major * 10 + cc_minor;
+  std::string cccl_include_str  = cccl::detail::parse_cccl_include_path(libcudacxx_path);
+  std::string ctk_root_str      = cccl::detail::parse_ctk_root(ctk_path);
+  const char* cccl_include_path = cccl_include_str.empty() ? nullptr : cccl_include_str.c_str();
+  const char* ctk_root          = ctk_root_str.empty() ? nullptr : ctk_root_str.c_str();
 
-  const auto input_keys_it_value_t   = cccl_type_enum_to_name(input_keys_it.value_type.type);
-  const auto input_items_it_value_t  = cccl_type_enum_to_name(input_items_it.value_type.type);
-  const auto output_keys_it_value_t  = cccl_type_enum_to_name(output_keys_it.value_type.type);
-  const auto output_items_it_value_t = cccl_type_enum_to_name(output_items_it.value_type.type);
-  const auto offset_t                = cccl_type_enum_to_name(cccl_type_enum::CCCL_UINT64);
+  auto jit_config = make_merge_sort_jit_config(
+    "cccl_jit_merge_sort", cc_major, cc_minor, clang_path, config, ctk_root, cccl_include_path);
 
-  const std::string input_keys_iterator_src = make_kernel_input_iterator(
-    offset_t,
-    get_iterator_name(input_keys_it, merge_sort::merge_sort_iterator_t::input_keys),
-    input_keys_it_value_t,
-    input_keys_it);
-  const std::string input_items_iterator_src = make_kernel_input_iterator(
-    offset_t,
-    get_iterator_name(input_items_it, merge_sort::merge_sort_iterator_t::input_items),
-    input_items_it_value_t,
-    input_items_it);
-  const std::string output_keys_iterator_src = make_kernel_output_iterator(
-    offset_t,
-    get_iterator_name(output_keys_it, merge_sort::merge_sort_iterator_t::output_keys),
-    output_keys_it_value_t,
-    output_keys_it);
-  const std::string output_items_iterator_src = make_kernel_output_iterator(
-    offset_t,
-    get_iterator_name(output_items_it, merge_sort::merge_sort_iterator_t::output_items),
-    output_items_it_value_t,
-    output_items_it);
+  uintptr_t unique_id = reinterpret_cast<uintptr_t>(build_ptr);
+  BitcodeCollector bitcode(jit_config, unique_id);
+  bitcode.add_op(op, "compare_op");
+  bitcode.add_iterator(d_in_keys, "in_keys");
+  if (!is_null_items(d_in_items))
+  {
+    bitcode.add_iterator(d_in_items, "in_items");
+  }
 
-  const std::string op_src = make_kernel_user_comparison_operator(input_keys_it_value_t, op);
+  std::string cuda_source = make_merge_sort_source(d_in_keys, d_in_items, op);
 
-  std::string policy_hub_expr =
-    std::format("cub::detail::merge_sort::policy_hub<{}>",
-                get_iterator_name(input_keys_it, merge_sort::merge_sort_iterator_t::input_keys));
+  auto* compiler = new JITCompiler(jit_config);
+  if (!compiler->compile(cuda_source))
+  {
+    std::string err = compiler->getLastError();
+    delete compiler;
+    bitcode.cleanup();
+    throw std::runtime_error("merge_sort compilation failed: " + err);
+  }
+  bitcode.cleanup();
 
-  std::string final_src = std::format(
-    R"XXX(
-#include <cub/device/dispatch/tuning/tuning_merge_sort.cuh>
-#include <cub/device/dispatch/kernels/kernel_merge_sort.cuh>
-#include <cub/util_type.cuh> // needed for cub::NullType
-struct __align__({1}) storage_t {{
-  char data[{0}];
-}};
-struct __align__({3}) items_storage_t {{
-  char data[{2}];
-}};
-{4}
-{5}
-{6}
-{7}
-{8}
-using device_merge_sort_policy = {9}::MaxPolicy;
+  auto fn = compiler->getFunction<sort_fn_t>("cccl_jit_merge_sort");
+  if (!fn)
+  {
+    std::string err = compiler->getLastError();
+    delete compiler;
+    throw std::runtime_error("merge_sort function lookup failed: " + err);
+  }
 
-struct device_merge_sort_vsmem_helper {{
-  template<typename ActivePolicyT, typename KeyInputIteratorT, typename ValueInputIteratorT, typename... Ts>
-  struct MergeSortVSMemHelperT {{
-    using policy_t = device_merge_sort_policy::ActivePolicy::MergeSortPolicy;
-    using block_sort_agent_t = cub::detail::merge_sort::AgentBlockSort<policy_t, KeyInputIteratorT, ValueInputIteratorT, Ts...>;
-    using merge_agent_t = cub::detail::merge_sort::AgentMerge<policy_t, Ts...>;
-  }};
-  template <typename AgentT>
-  struct VSmemHelperT {{
-    using static_temp_storage_t = typename AgentT::TempStorage;
-    static _CCCL_DEVICE _CCCL_FORCEINLINE static_temp_storage_t& get_temp_storage(
-      static_temp_storage_t& static_temp_storage, cub::detail::vsmem_t& vsmem)
-    {{
-        return static_temp_storage;
-    }}
-    template <bool needs_vsmem_ = false, ::cuda::std::enable_if_t<!needs_vsmem_, int> = 0>
-    static _CCCL_DEVICE _CCCL_FORCEINLINE bool discard_temp_storage(static_temp_storage_t& temp_storage)
-    {{
-      return false;
-    }}
-  }};
-}};
+  auto cubin = compiler->getCubin();
 
-#include <cub/detail/ptx-json/json.cuh>
-__device__ consteval auto& policy_generator() {{
-  return ptx_json::id<ptx_json::string("device_merge_sort_policy")>()
-    = cub::detail::merge_sort::MergeSortPolicyWrapper<device_merge_sort_policy::ActivePolicy>::EncodedPolicy();
-}}
-)XXX",
-    input_keys_it.value_type.size, // 0
-    input_keys_it.value_type.alignment, // 1
-    input_items_it.value_type.size, // 2
-    input_items_it.value_type.alignment, // 3
-    input_keys_iterator_src, // 4
-    input_items_iterator_src, // 5
-    output_keys_iterator_src, // 6
-    output_items_iterator_src, // 7
-    op_src, // 8
-    policy_hub_expr); // 9
-
-#if false // CCCL_DEBUGGING_SWITCH
-  fflush(stderr);
-  printf("\nCODE4NVRTC BEGIN\n%sCODE4NVRTC END\n", final_src.c_str());
-  fflush(stdout);
-#endif
-
-  std::string block_sort_kernel_name = merge_sort::get_merge_sort_kernel_name(
-    "DeviceMergeSortBlockSortKernel", input_keys_it, input_items_it, output_keys_it, output_items_it);
-  std::string partition_kernel_name = merge_sort::get_partition_kernel_name(output_keys_it);
-  std::string merge_kernel_name     = merge_sort::get_merge_sort_kernel_name(
-    "DeviceMergeSortMergeKernel", input_keys_it, input_items_it, output_keys_it, output_items_it);
-  std::string block_sort_kernel_lowered_name;
-  std::string partition_kernel_lowered_name;
-  std::string merge_kernel_lowered_name;
-
-  const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
-
-  std::vector<const char*> args = {
-    arch.c_str(),
-    cub_path,
-    thrust_path,
-    libcudacxx_path,
-    ctk_path,
-    "-rdc=true",
-    "-dlto",
-    "-DCUB_DISABLE_CDP",
-    "-DCUB_ENABLE_POLICY_PTX_JSON",
-    "-std=c++20"};
-
-  cccl::detail::extend_args_with_build_config(args, config);
-
-  constexpr size_t num_lto_args   = 2;
-  const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
-
-  // Collect all LTO-IRs to be linked.
-  nvrtc_linkable_list linkable_list;
-  nvrtc_linkable_list_appender list_appender{linkable_list};
-
-  list_appender.append_operation(op);
-  list_appender.add_iterator_definition(input_keys_it);
-  list_appender.add_iterator_definition(input_items_it);
-  list_appender.add_iterator_definition(output_keys_it);
-  list_appender.add_iterator_definition(output_items_it);
-
-  nvrtc_link_result result =
-    begin_linking_nvrtc_program(num_lto_args, lopts)
-      ->add_program(nvrtc_translation_unit{final_src.c_str(), name})
-      ->add_expression({block_sort_kernel_name})
-      ->add_expression({partition_kernel_name})
-      ->add_expression({merge_kernel_name})
-      ->compile_program({args.data(), args.size()})
-      ->get_name({block_sort_kernel_name, block_sort_kernel_lowered_name})
-      ->get_name({partition_kernel_name, partition_kernel_lowered_name})
-      ->get_name({merge_kernel_name, merge_kernel_lowered_name})
-      ->link_program()
-      ->add_link_list(linkable_list)
-      ->finalize_program();
-
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(&build_ptr->block_sort_kernel, build_ptr->library, block_sort_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->partition_kernel, build_ptr->library, partition_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->merge_kernel, build_ptr->library, merge_kernel_lowered_name.c_str()));
-
-  nlohmann::json runtime_policy =
-    cub::detail::ptx_json::parse("device_merge_sort_policy", {result.data.get(), result.size});
-
-  using cub::detail::RuntimeMergeSortAgentPolicy;
-  auto ms_policy = RuntimeMergeSortAgentPolicy::from_json(runtime_policy, "MergeSortPolicy");
-
-  build_ptr->cc             = cc;
-  build_ptr->cubin          = (void*) result.data.release();
-  build_ptr->cubin_size     = result.size;
-  build_ptr->key_type       = input_keys_it.value_type;
-  build_ptr->item_type      = input_items_it.value_type;
-  build_ptr->runtime_policy = new merge_sort::merge_sort_runtime_tuning_policy{ms_policy};
+  build_ptr->cc         = cc_major * 10 + cc_minor;
+  build_ptr->cubin      = nullptr;
+  build_ptr->cubin_size = 0;
+  if (!cubin.empty())
+  {
+    auto* cubin_copy = new char[cubin.size()];
+    std::memcpy(cubin_copy, cubin.data(), cubin.size());
+    build_ptr->cubin      = cubin_copy;
+    build_ptr->cubin_size = cubin.size();
+  }
+  build_ptr->jit_compiler = compiler;
+  build_ptr->sort_fn      = reinterpret_cast<void*>(fn);
+  build_ptr->key_type     = d_in_keys.value_type;
+  build_ptr->item_type    = d_in_items.value_type;
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
-  fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_merge_sort_build(): %s\n", exc.what());
-  fflush(stdout);
-
+  fprintf(stderr, "\nEXCEPTION in cccl_device_merge_sort_build(): %s\n", exc.what());
   return CUDA_ERROR_UNKNOWN;
-}
-
-CUresult cccl_device_merge_sort(
-  cccl_device_merge_sort_build_result_t build,
-  void* d_temp_storage,
-  size_t* temp_storage_bytes,
-  cccl_iterator_t d_in_keys,
-  cccl_iterator_t d_in_items,
-  cccl_iterator_t d_out_keys,
-  cccl_iterator_t d_out_items,
-  uint64_t num_items,
-  cccl_op_t op,
-  CUstream stream)
-{
-  if (cccl_iterator_kind_t::CCCL_ITERATOR == d_out_keys.type || cccl_iterator_kind_t::CCCL_ITERATOR == d_out_items.type)
-  {
-    // See https://github.com/NVIDIA/cccl/issues/3722
-    fflush(stderr);
-    printf("\nERROR in cccl_device_merge_sort(): merge sort output cannot be an iterator\n");
-    fflush(stdout);
-    return CUDA_ERROR_UNKNOWN;
-  }
-
-  CUresult error = CUDA_SUCCESS;
-  bool pushed    = false;
-  try
-  {
-    pushed = try_push_context();
-
-    CUdevice cu_device;
-    check(cuCtxGetDevice(&cu_device));
-
-    auto exec_status = cub::DispatchMergeSort<
-      indirect_arg_t,
-      indirect_arg_t,
-      indirect_arg_t,
-      indirect_arg_t,
-      OffsetT,
-      indirect_arg_t,
-      merge_sort::merge_sort_runtime_tuning_policy,
-      merge_sort::merge_sort_kernel_source,
-      cub::detail::CudaDriverLauncherFactory,
-      merge_sort::dynamic_vsmem_helper_t,
-      indirect_arg_t,
-      indirect_arg_t>::Dispatch(d_temp_storage,
-                                *temp_storage_bytes,
-                                d_in_keys,
-                                d_in_items,
-                                d_out_keys,
-                                d_out_items,
-                                num_items,
-                                op,
-                                stream,
-                                {build},
-                                cub::detail::CudaDriverLauncherFactory{cu_device, build.cc},
-                                *reinterpret_cast<merge_sort::merge_sort_runtime_tuning_policy*>(build.runtime_policy));
-
-    error = static_cast<CUresult>(exec_status);
-  }
-  catch (const std::exception& exc)
-  {
-    fflush(stderr);
-    printf("\nEXCEPTION in cccl_device_merge_sort(): %s\n", exc.what());
-    fflush(stdout);
-    error = CUDA_ERROR_UNKNOWN;
-  }
-
-  if (pushed)
-  {
-    CUcontext dummy;
-    cuCtxPopCurrent(&dummy);
-  }
-
-  return error;
 }
 
 CUresult cccl_device_merge_sort_build(
@@ -512,7 +323,8 @@ CUresult cccl_device_merge_sort_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path)
+  const char* ctk_path,
+  const char* clang_path)
 {
   return cccl_device_merge_sort_build_ex(
     build,
@@ -527,8 +339,59 @@ CUresult cccl_device_merge_sort_build(
     thrust_path,
     libcudacxx_path,
     ctk_path,
+    clang_path,
     nullptr);
 }
+
+// ---------------------------------------------------------------------------
+// Run
+// ---------------------------------------------------------------------------
+
+CUresult cccl_device_merge_sort(
+  cccl_device_merge_sort_build_result_t build,
+  void* d_temp_storage,
+  size_t* temp_storage_bytes,
+  cccl_iterator_t d_in_keys,
+  cccl_iterator_t d_in_items,
+  cccl_iterator_t d_out_keys,
+  cccl_iterator_t d_out_items,
+  uint64_t num_items,
+  cccl_op_t op,
+  CUstream stream)
+{
+  try
+  {
+    auto sort_fn = reinterpret_cast<sort_fn_t>(build.sort_fn);
+    if (!sort_fn)
+    {
+      return CUDA_ERROR_INVALID_VALUE;
+    }
+
+    // Parameter order matches the generated function signature:
+    // (temp, temp_bytes, in_keys, in_items, out_keys, out_items, num_items, op_state, stream)
+    int status = sort_fn(
+      d_temp_storage,
+      temp_storage_bytes,
+      d_in_keys.state,
+      d_in_items.state,
+      d_out_keys.state,
+      d_out_items.state,
+      num_items,
+      op.state,
+      reinterpret_cast<void*>(stream));
+
+    return (status == 0) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
+  }
+  catch (const std::exception& exc)
+  {
+    fprintf(stderr, "\nEXCEPTION in cccl_device_merge_sort(): %s\n", exc.what());
+    return CUDA_ERROR_UNKNOWN;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
 
 CUresult cccl_device_merge_sort_cleanup(cccl_device_merge_sort_build_result_t* build_ptr)
 try
@@ -538,17 +401,23 @@ try
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
-  std::unique_ptr<char[]> policy(reinterpret_cast<char*>(build_ptr->runtime_policy));
-  check(cuLibraryUnload(build_ptr->library));
+  if (build_ptr->jit_compiler)
+  {
+    delete static_cast<JITCompiler*>(build_ptr->jit_compiler);
+    build_ptr->jit_compiler = nullptr;
+  }
+  if (build_ptr->cubin)
+  {
+    delete[] static_cast<char*>(build_ptr->cubin);
+    build_ptr->cubin = nullptr;
+  }
+  build_ptr->cubin_size = 0;
+  build_ptr->sort_fn    = nullptr;
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
-  fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_merge_sort_cleanup(): %s\n", exc.what());
-  fflush(stdout);
-
+  fprintf(stderr, "\nEXCEPTION in cccl_device_merge_sort_cleanup(): %s\n", exc.what());
   return CUDA_ERROR_UNKNOWN;
 }

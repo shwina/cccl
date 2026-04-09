@@ -3,7 +3,8 @@ from __future__ import annotations
 from .._utils.protocols import is_device_array
 from ._base import IteratorBase
 
-CUDA_PREAMBLE = """#include <cuda/std/cstdint>
+CUDA_PREAMBLE = """#include <cuda_fp16.h>
+#include <cuda/std/cstdint>
 #include <cuda/std/cstring>
 using namespace cuda::std;
 """

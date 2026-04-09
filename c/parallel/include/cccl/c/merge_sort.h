@@ -27,13 +27,10 @@ typedef struct cccl_device_merge_sort_build_result_t
   int cc;
   void* cubin;
   size_t cubin_size;
-  CUlibrary library;
+  void* jit_compiler;
+  void* sort_fn;
   cccl_type_info key_type;
   cccl_type_info item_type;
-  CUkernel block_sort_kernel;
-  CUkernel partition_kernel;
-  CUkernel merge_kernel;
-  void* runtime_policy;
 } cccl_device_merge_sort_build_result_t;
 
 CCCL_C_API CUresult cccl_device_merge_sort_build(
@@ -48,7 +45,8 @@ CCCL_C_API CUresult cccl_device_merge_sort_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path);
+  const char* ctk_path,
+  const char* clang_path);
 
 // Extended version with build configuration
 CCCL_C_API CUresult cccl_device_merge_sort_build_ex(
@@ -64,6 +62,7 @@ CCCL_C_API CUresult cccl_device_merge_sort_build_ex(
   const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config);
 
 CCCL_C_API CUresult cccl_device_merge_sort(

@@ -1535,7 +1535,7 @@ cdef extern from "cccl/c/merge_sort.h":
         cccl_iterator_t d_out_keys,
         cccl_iterator_t d_out_items,
         cccl_op_t,
-        int, int, const char*, const char*, const char*, const char*
+        int, int, const char*, const char*, const char*, const char*, const char*
     ) nogil
 
     cdef CUresult cccl_device_merge_sort(
@@ -1575,6 +1575,7 @@ cdef class DeviceMergeSortBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         memset(&self.build_data, 0, sizeof(cccl_device_merge_sort_build_result_t))
         with nogil:
@@ -1591,6 +1592,7 @@ cdef class DeviceMergeSortBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(
