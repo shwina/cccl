@@ -1,10 +1,9 @@
-#include <clangjit/codegen/iterators.hpp>
-
 #include <format>
+
+#include <clangjit/codegen/iterators.hpp>
 
 namespace clangjit::codegen
 {
-
 IteratorCode make_input_iterator(
   cccl_iterator_t it,
   const std::string& value_type_name,
@@ -34,8 +33,7 @@ IteratorCode make_input_iterator(
   else
   {
     // Custom iterator with state + advance + dereference
-    const std::string adv_name =
-      (it.advance.name && it.advance.name[0]) ? it.advance.name : (var_name + "_advance");
+    const std::string adv_name = (it.advance.name && it.advance.name[0]) ? it.advance.name : (var_name + "_advance");
     const std::string deref_name =
       (it.dereference.name && it.dereference.name[0]) ? it.dereference.name : (var_name + "_dereference");
 
@@ -52,45 +50,45 @@ IteratorCode make_input_iterator(
       deref_name,
       val_alias);
 
+    // Positional args: {0}=struct_name, {1}=val_alias, {2}=it.size, {3}=adv_name, {4}=deref_name
     result.preamble += std::format(
-      "struct {} {{\n"
-      "  using value_type = {};\n"
+      "struct {0} {{\n"
+      "  using value_type = {1};\n"
       "  using difference_type = long long;\n"
-      "  using pointer = {}*;\n"
-      "  using reference = {};\n"
+      "  using pointer = {1}*;\n"
+      "  using reference = {1};\n"
       "  using iterator_category = cuda::std::random_access_iterator_tag;\n"
       "\n"
-      "  char state[{}];\n"
+      "  char state[{2}];\n"
       "\n"
-      "  __device__ {} operator+(difference_type n) const {{\n"
-      "    {} copy = *this;\n"
+      "  __device__ {0} operator+(difference_type n) const {{\n"
+      "    {0} copy = *this;\n"
       "    unsigned long long offset = static_cast<unsigned long long>(n);\n"
-      "    {}(copy.state, &offset);\n"
+      "    {3}(copy.state, &offset);\n"
       "    return copy;\n"
       "  }}\n"
-      "  __device__ difference_type operator-(const {}&) const {{ return 0; }}\n"
-      "  __device__ reference operator*() const {{\n"
-      "    {} result;\n"
-      "    {}(state, &result);\n"
+      "  __device__ {0}& operator+=(difference_type n) {{\n"
+      "    unsigned long long offset = static_cast<unsigned long long>(n);\n"
+      "    {3}(state, &offset);\n"
+      "    return *this;\n"
+      "  }}\n"
+      "  __device__ {0}& operator++() {{ return *this += 1; }}\n"
+      "  __device__ {0}  operator++(int) {{ {0} tmp = *this; ++(*this); return tmp; }}\n"
+      "  __device__ difference_type operator-(const {0}&) const {{ return 0; }}\n"
+      "  __device__ {1} operator*() const {{\n"
+      "    {1} result;\n"
+      "    {4}(state, &result);\n"
       "    return result;\n"
       "  }}\n"
-      "  __device__ reference operator[](difference_type n) const {{ return *(*this + n); }}\n"
-      "  __device__ bool operator==(const {}&) const {{ return false; }}\n"
-      "  __device__ bool operator!=(const {}&) const {{ return true; }}\n"
+      "  __device__ {1} operator[](difference_type n) const {{ return *(*this + n); }}\n"
+      "  __device__ bool operator==(const {0}&) const {{ return false; }}\n"
+      "  __device__ bool operator!=(const {0}&) const {{ return true; }}\n"
       "}};\n\n",
-      struct_name, // struct name
-      val_alias, // value_type
-      val_alias, // pointer
-      val_alias, // reference
-      it.size, // state size
-      struct_name, // operator+ return type
-      struct_name, // copy type
-      adv_name, // advance function
-      struct_name, // operator- param
-      val_alias, // operator* result type
-      deref_name, // dereference function
-      struct_name, // operator== param
-      struct_name); // operator!= param
+      struct_name, // {0}
+      val_alias, // {1}
+      it.size, // {2}
+      adv_name, // {3}
+      deref_name); // {4}
 
     result.setup_code = std::format(
       "{} {};\n"
@@ -117,15 +115,14 @@ IteratorCode make_output_iterator(
 
   if (it.type == CCCL_POINTER)
   {
-    result.type_name  = accum_type_name + "*";
-    result.preamble   = std::format("using {} = {}*;\n\n", struct_name, accum_type_name);
-    result.setup_code = std::format(
-      "{} {} = static_cast<{}*>({});", struct_name, var_name, accum_type_name, state_param);
+    result.type_name = accum_type_name + "*";
+    result.preamble  = std::format("using {} = {}*;\n\n", struct_name, accum_type_name);
+    result.setup_code =
+      std::format("{} {} = static_cast<{}*>({});", struct_name, var_name, accum_type_name, state_param);
   }
   else
   {
-    const std::string adv_name =
-      (it.advance.name && it.advance.name[0]) ? it.advance.name : (var_name + "_advance");
+    const std::string adv_name = (it.advance.name && it.advance.name[0]) ? it.advance.name : (var_name + "_advance");
     const std::string deref_name =
       (it.dereference.name && it.dereference.name[0]) ? it.dereference.name : (var_name + "_dereference");
 
@@ -192,5 +189,4 @@ IteratorCode make_output_iterator(
 
   return result;
 }
-
 } // namespace clangjit::codegen

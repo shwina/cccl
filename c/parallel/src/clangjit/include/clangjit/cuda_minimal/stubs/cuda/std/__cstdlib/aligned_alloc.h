@@ -1,62 +1,65 @@
-// ClangJIT override of cuda/std/__cstdlib/aligned_alloc.h
+// ClangJIT minimal stub for cuda/std/__cstdlib/aligned_alloc.h
 //
 // Problem: clangjit compiles with _CCCL_ENABLE_FREESTANDING=1 in both device
-// and host passes (the whole environment is freestanding). This causes
-// _CCCL_HOSTED() = 0, so __aligned_alloc_host is never defined. But
-// kernel_transform.cuh's include chain (copy.h -> cstdlib -> aligned_alloc.h)
-// still references ::cuda::std::__aligned_alloc_host in the NV_IS_HOST branch
-// of aligned_alloc(), causing a host compilation error.
+// and host passes.  The host pass needs ::cuda::std::__aligned_alloc_host, but
+// the real header gates that function on _CCCL_HOSTED(), which is 0 in a
+// freestanding build.
 //
-// Fix: always define __aligned_alloc_host unconditionally (not gated on
-// _CCCL_HOSTED). The NV_IF_ELSE_TARGET macro uses Clang's "if target"
-// extension which discards the inactive branch, so this is never actually
-// called in device code, and the host-side CUB dispatch never calls
-// aligned_alloc either — it just needs to compile.
+// Solution: replace the entire header with a bare-metal stub that uses only
+// compiler builtins (__builtin_malloc, __SIZE_TYPE__) and NO CCCL headers.
+// Including CCCL headers from within this stub caused __clang_cuda_device_functions.h
+// to be re-processed before __clang_cuda_libdevice_declares.h during device
+// compilation, producing "undeclared identifier __nv_ull2float_rz" errors.
+//
+// __builtin_malloc is a compiler intrinsic — no headers required.
+// __SIZE_TYPE__ is a compiler predefined macro equal to the platform size_t type.
+//
+// Neither path is ever actually called at runtime:
+//   - Host pass: CUB dispatch never calls aligned_alloc in our generated source.
+//   - Device pass: NV_IF_ELSE_TARGET discards the NV_IS_HOST branch at compile time.
 
 #ifndef _CUDA_STD___CSTDLIB_ALIGNED_ALLOC_H
 #define _CUDA_STD___CSTDLIB_ALIGNED_ALLOC_H
 
-#include <cuda/std/detail/__config>
+#if defined(__CUDA_ARCH__)
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
+// ── Device compilation ────────────────────────────────────────────────────
+// Provide cuda::std::aligned_alloc via the CUDA device syscall.
+// The NV_IS_HOST branch of the CUB include chain is discarded by Clang's
+// "if target" extension, so this function is never actually called.
+extern "C" __device__ void* __cuda_syscall_aligned_malloc(__SIZE_TYPE__, __SIZE_TYPE__);
 
-#include <cuda/std/__cstddef/types.h>
+namespace cuda
+{
+namespace std
+{
+inline __device__ void* aligned_alloc(__SIZE_TYPE__ __nbytes, __SIZE_TYPE__ __align) noexcept
+{
+  return ::__cuda_syscall_aligned_malloc(__nbytes, __align);
+}
+} // namespace std
+} // namespace cuda
 
-#include <nv/target>
+#else
 
-#include <cuda/std/__cccl/prologue.h>
-
-#if _CCCL_CUDA_COMPILATION()
-extern "C" _CCCL_DEVICE void* __cuda_syscall_aligned_malloc(size_t, size_t);
-#endif // _CCCL_CUDA_COMPILATION()
-
-_CCCL_BEGIN_NAMESPACE_CUDA_STD
-
-// Define __aligned_alloc_host unconditionally (not gated on _CCCL_HOSTED()).
-// In the clangjit freestanding environment the host stdlib is unavailable as
-// system headers, so we use __builtin_malloc (a compiler intrinsic requiring
-// no headers). This path is never actually reached at runtime.
-[[nodiscard]] _CCCL_HIDE_FROM_ABI _CCCL_HOST void*
-__aligned_alloc_host([[maybe_unused]] size_t __nbytes, [[maybe_unused]] size_t) noexcept
+// ── Host compilation ──────────────────────────────────────────────────────
+// Define __aligned_alloc_host unconditionally so the CUB include chain
+// compiles even when _CCCL_HOSTED() == 0.  __builtin_malloc needs no headers.
+namespace cuda
+{
+namespace std
+{
+inline void* __aligned_alloc_host(__SIZE_TYPE__ __nbytes, __SIZE_TYPE__) noexcept
 {
   return __builtin_malloc(__nbytes);
 }
-
-[[nodiscard]] _CCCL_API inline void* aligned_alloc(size_t __nbytes, size_t __align) noexcept
+inline void* aligned_alloc(__SIZE_TYPE__ __nbytes, __SIZE_TYPE__ __align) noexcept
 {
-  NV_IF_ELSE_TARGET(NV_IS_HOST,
-                    (return ::cuda::std::__aligned_alloc_host(__nbytes, __align);),
-                    (return ::__cuda_syscall_aligned_malloc(__nbytes, __align);))
+  return ::cuda::std::__aligned_alloc_host(__nbytes, __align);
 }
+} // namespace std
+} // namespace cuda
 
-_CCCL_END_NAMESPACE_CUDA_STD
-
-#include <cuda/std/__cccl/epilogue.h>
+#endif // __CUDA_ARCH__
 
 #endif // _CUDA_STD___CSTDLIB_ALIGNED_ALLOC_H

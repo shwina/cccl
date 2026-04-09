@@ -1,16 +1,14 @@
-#include <clangjit/codegen/bitcode.hpp>
-#include <clangjit/compiler.hpp>
-
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 
+#include <clangjit/codegen/bitcode.hpp>
+#include <clangjit/compiler.hpp>
+
 namespace clangjit::codegen
 {
-
 namespace
 {
-
 bool write_file(const char* data, size_t size, const std::string& path)
 {
   std::ofstream f(path, std::ios::binary);
@@ -26,7 +24,6 @@ std::string make_temp_path(const std::string& prefix, uintptr_t id, const std::s
 {
   return (std::filesystem::temp_directory_path() / (prefix + std::to_string(id) + ext)).string();
 }
-
 } // anonymous namespace
 
 BitcodeCollector::BitcodeCollector(CompilerConfig& config, uintptr_t unique_id)
@@ -78,6 +75,17 @@ void BitcodeCollector::add_op_code(cccl_op_t& op, const std::string& name)
   {
     return;
   }
+
+  // Deduplicate: if two iterators share the same symbol (e.g. two CountingIterators
+  // of the same type), only compile/link the bitcode once.
+  if (op.name && op.name[0])
+  {
+    if (!added_symbols_.insert(std::string(op.name)).second)
+    {
+      return; // already added
+    }
+  }
+
   if (op.code_type == CCCL_OP_CPP_SOURCE)
   {
     compile_and_add(op.code, op.code_size, name);
@@ -161,5 +169,4 @@ void BitcodeCollector::cleanup()
   }
   temp_paths_.clear();
 }
-
 } // namespace clangjit::codegen

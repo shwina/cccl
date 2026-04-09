@@ -1,14 +1,14 @@
 #pragma once
 
-#include <cccl/c/types.h>
-#include <clangjit/config.hpp>
-
+#include <set>
 #include <string>
 #include <vector>
 
+#include <cccl/c/types.h>
+#include <clangjit/config.hpp>
+
 namespace clangjit::codegen
 {
-
 // Manages bitcode files needed for linking. Collects LTOIR, LLVM IR,
 // and C++ source (compiling the latter to bitcode on the fly).
 // Tracks temp file paths for cleanup.
@@ -38,6 +38,6 @@ private:
   CompilerConfig& config_;
   uintptr_t unique_id_;
   std::vector<std::string> temp_paths_;
+  std::set<std::string> added_symbols_; // dedup: skip same symbol added twice
 };
-
 } // namespace clangjit::codegen

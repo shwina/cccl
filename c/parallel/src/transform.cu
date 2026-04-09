@@ -82,9 +82,11 @@ static std::string make_unary_transform_source(cccl_iterator_t d_in, cccl_iterat
   src += in_code.preamble;
   src += out_code.preamble;
 
-  const bool is_negate = (op.type == CCCL_NEGATE);
+  const bool is_negate     = (op.type == CCCL_NEGATE);
+  const bool is_identity   = (op.type == CCCL_IDENTITY);
+  const bool is_well_known = is_negate || is_identity;
 
-  if (!is_negate)
+  if (!is_well_known)
   {
     if (op.code_type == CCCL_OP_CPP_SOURCE && op.code && op.code_size > 0)
     {
@@ -108,6 +110,10 @@ static std::string make_unary_transform_source(cccl_iterator_t d_in, cccl_iterat
   if (is_negate)
   {
     src += "using UnaryOp_0 = ::cuda::std::negate<>;\n\n";
+  }
+  else if (is_identity)
+  {
+    src += "using UnaryOp_0 = ::cuda::std::identity;\n\n";
   }
   else if (stateful)
   {
@@ -148,7 +154,7 @@ static std::string make_unary_transform_source(cccl_iterator_t d_in, cccl_iterat
          ") {\n";
   src += "    " + in_code.setup_code + "\n";
   src += "    " + out_code.setup_code + "\n";
-  if (is_negate || !stateful)
+  if (is_well_known || !stateful)
   {
     src += "    UnaryOp_0 op_0{};\n";
   }
@@ -170,19 +176,35 @@ static std::string make_unary_transform_source(cccl_iterator_t d_in, cccl_iterat
 static std::string
 make_binary_transform_source(cccl_iterator_t d_in1, cccl_iterator_t d_in2, cccl_iterator_t d_out, cccl_op_t op)
 {
-  const auto in1_type   = get_type_name(d_in1.value_type.type);
-  const auto in2_type   = get_type_name(d_in2.value_type.type);
-  const auto out_type   = get_type_name(d_out.value_type.type);
-  const bool has_bc     = BitcodeCollector::is_bitcode_op(op);
-  const auto accum_type = out_type.empty() ? std::string("accum_t") : out_type;
+  const auto in1_type = get_type_name(d_in1.value_type.type);
+  const auto in2_type = get_type_name(d_in2.value_type.type);
+  const auto out_type = get_type_name(d_out.value_type.type);
+  const bool has_bc   = BitcodeCollector::is_bitcode_op(op);
 
-  auto in0_code = make_input_iterator(d_in1, in1_type, "accum_t", "in_0_it_t", "in_0", "d_in_0");
-  auto in1_code = make_input_iterator(d_in2, in2_type, "accum_t", "in_1_it_t", "in_1", "d_in_1");
-  auto out_code = make_output_iterator(d_out, "accum_t", "out_0_it_t", "out_0", "d_out_0");
+  // For custom output types, emit a storage struct; for known types, use a type alias.
+  std::string accum_preamble;
+  std::string accum_type;
+  if (out_type.empty())
+  {
+    accum_preamble = make_storage_type("accum_t", d_out.value_type.size, d_out.value_type.alignment);
+    accum_type     = "accum_t";
+  }
+  else
+  {
+    accum_type = out_type;
+  }
+
+  auto in0_code = make_input_iterator(d_in1, in1_type, accum_type, "in_0_it_t", "in_0", "d_in_0");
+  auto in1_code = make_input_iterator(d_in2, in2_type, accum_type, "in_1_it_t", "in_1", "d_in_1");
+  auto out_code = make_output_iterator(d_out, accum_type, "out_0_it_t", "out_0", "d_out_0");
   auto op_code  = make_binary_op(op, accum_type, "Op_0", "op_0", "op_0_state", has_bc);
 
   std::string src;
   src += "#include <cuda_runtime.h>\n";
+  src += "#include <cuda_fp16.h>\n";
+  src += "#include <cuda/std/iterator>\n";
+  src += "#include <cuda/std/functional>\n";
+  src += "#include <cuda/functional>\n";
   src += "#include <cuda/std/tuple>\n";
   src += "#include <cub/device/device_transform.cuh>\n\n";
 
@@ -192,8 +214,15 @@ make_binary_transform_source(cccl_iterator_t d_in1, cccl_iterator_t d_in2, cccl_
          "#define EXPORT __attribute__((visibility(\"default\")))\n"
          "#endif\n\n";
 
-  // Emit accum_t alias (based on output type)
-  src += std::format("using accum_t = {};\n\n", out_type.empty() ? std::string("char") : out_type);
+  // Emit accum_t definition (storage struct for custom types, type alias otherwise)
+  if (!accum_preamble.empty())
+  {
+    src += accum_preamble;
+  }
+  else
+  {
+    src += std::format("using accum_t = {};\n\n", accum_type);
+  }
 
   src += in0_code.preamble;
   src += in1_code.preamble;
