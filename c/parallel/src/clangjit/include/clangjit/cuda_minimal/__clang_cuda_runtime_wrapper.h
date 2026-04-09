@@ -61,8 +61,10 @@
 // ---- Clang device function wrappers (local copies, CUDA < 9.0 removed) ----
 // NOTE: libdevice_declares.h must precede device_functions.h — the latter calls
 // __nv_* symbols that are declared in the former.
-#  include "__clang_cuda_device_functions.h"
+// clang-format off
 #  include "__clang_cuda_libdevice_declares.h"
+#  include "__clang_cuda_device_functions.h"
+// clang-format on
 #  include "__clang_cuda_math.h"
 
 // ---- Address-space intrinsics needed by CCCL headers ----
