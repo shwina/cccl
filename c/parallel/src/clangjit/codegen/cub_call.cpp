@@ -45,6 +45,14 @@ cccl_type_info find_accum_type(const std::vector<Arg>& args)
       return val->type;
     }
   }
+  // Second: future_val_t carries explicit type info
+  for (const auto& arg : args)
+  {
+    if (auto* fv = std::get_if<future_val_t>(&arg))
+    {
+      return fv->type;
+    }
+  }
   // Fallback: first input iterator's value_type
   for (const auto& arg : args)
   {
@@ -180,6 +188,19 @@ std::string CubCall::source() const
           preamble += code.preamble;
           params.push_back(std::format("void* {}", state_param));
           setup_lines.push_back(code.setup_code);
+          cub_args.push_back(var_name);
+        }
+        else if constexpr (std::is_same_v<T, future_val_t>)
+        {
+          auto idx        = val_count++;
+          auto var_name   = std::format("future_{}", idx);
+          auto param_name = std::format("future_{}_param", idx);
+
+          // The caller passes a device pointer; we wrap it in FutureValue<accum_t>
+          // so CUB fetches the init value from device memory at scan time.
+          params.push_back(std::format("void* {}", param_name));
+          setup_lines.push_back(
+            std::format("cub::FutureValue<accum_t> {}(static_cast<accum_t*>({}));", var_name, param_name));
           cub_args.push_back(var_name);
         }
         else if constexpr (std::is_same_v<T, cccl_value_t>)

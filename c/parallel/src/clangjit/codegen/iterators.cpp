@@ -138,14 +138,21 @@ IteratorCode make_output_iterator(
       adv_name,
       deref_name);
 
+    // The proxy carries a COPY of the iterator state, not a pointer to it.
+    // This is critical for indexed writes (output_it[i] = val): operator[] creates
+    // a temporary advanced iterator, calls operator* on it, and returns the proxy
+    // by value.  After operator[] returns the temporary is destroyed, so a pointer
+    // to its state would be dangling.  Storing the state bytes in the proxy itself
+    // makes the proxy self-contained and safe across that return.
     result.preamble += std::format(
       "struct {} {{\n"
-      "  void* state;\n"
+      "  char state[{}];\n"
       "  __device__ void operator=(const {}& val) {{\n"
       "    {}(state, &val);\n"
       "  }}\n"
       "}};\n",
       proxy_name,
+      it.size,
       elem_type,
       deref_name);
 
@@ -166,7 +173,11 @@ IteratorCode make_output_iterator(
       "    return copy;\n"
       "  }}\n"
       "  __device__ difference_type operator-(const {}&) const {{ return 0; }}\n"
-      "  __device__ reference operator*() {{ return {}{{state}}; }}\n"
+      "  __device__ reference operator*() {{\n"
+      "    {} proxy;\n"
+      "    __builtin_memcpy(proxy.state, state, {});\n"
+      "    return proxy;\n"
+      "  }}\n"
       "  __device__ reference operator[](difference_type n) {{ return *(*this + n); }}\n"
       "}};\n\n",
       struct_name, // struct name
@@ -178,7 +189,8 @@ IteratorCode make_output_iterator(
       struct_name, // copy type
       adv_name, // advance function
       struct_name, // operator- param
-      proxy_name); // proxy constructor
+      proxy_name, // proxy type for operator*
+      it.size); // memcpy size
 
     result.setup_code = std::format(
       "{} {};\n"

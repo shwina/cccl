@@ -28,15 +28,10 @@ typedef struct cccl_device_scan_build_result_t
   int cc;
   void* cubin;
   size_t cubin_size;
-  CUlibrary library;
-  cccl_type_info accumulator_type;
-  CUkernel init_kernel;
-  CUkernel scan_kernel;
+  void* jit_compiler;
+  void* scan_fn;
   bool force_inclusive;
   cccl_init_kind_t init_kind;
-  size_t description_bytes_per_tile;
-  size_t payload_bytes_per_tile;
-  void* runtime_policy;
 } cccl_device_scan_build_result_t;
 
 CCCL_C_API CUresult cccl_device_scan_build(
@@ -52,7 +47,8 @@ CCCL_C_API CUresult cccl_device_scan_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path);
+  const char* ctk_path,
+  const char* clang_path);
 
 // Extended version with build configuration
 CCCL_C_API CUresult cccl_device_scan_build_ex(
@@ -69,6 +65,7 @@ CCCL_C_API CUresult cccl_device_scan_build_ex(
   const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config);
 
 CCCL_C_API CUresult cccl_device_exclusive_scan(

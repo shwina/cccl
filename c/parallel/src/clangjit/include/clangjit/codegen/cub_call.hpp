@@ -63,9 +63,21 @@ inline cmp_t cmp(cccl_op_t op)
   return {op};
 }
 
+// future_val_t: the init value lives on the device at runtime.  Generates
+// cub::FutureValue<accum_t>(static_cast<accum_t*>(param)) in the CUB call.
+// Carries type info so find_accum_type can resolve accum_t correctly.
+struct future_val_t
+{
+  cccl_type_info type;
+};
+inline future_val_t future_val(cccl_type_info t)
+{
+  return {t};
+}
+
 // Argument variant: everything that can appear in .with()
-using Arg =
-  std::variant<temp_storage_t, temp_bytes_t, num_items_t, stream_t, input_t, output_t, cccl_op_t, cmp_t, cccl_value_t>;
+using Arg = std::
+  variant<temp_storage_t, temp_bytes_t, num_items_t, stream_t, input_t, output_t, cccl_op_t, cmp_t, future_val_t, cccl_value_t>;
 
 // Result of a successful compilation.
 struct CubCallResult
