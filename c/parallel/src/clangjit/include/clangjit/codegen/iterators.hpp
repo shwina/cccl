@@ -1,19 +1,18 @@
 #pragma once
 
-#include <cccl/c/types.h>
-
 #include <string>
+
+#include <cccl/c/types.h>
 
 namespace clangjit::codegen
 {
-
 // Result of generating iterator code.
 struct IteratorCode
 {
-  std::string preamble;   // type alias or struct definition (goes at file scope)
+  std::string preamble; // type alias or struct definition (goes at file scope)
   std::string setup_code; // initialization inside function body
-  std::string local_var;  // e.g., "in_0"
-  std::string type_name;  // e.g., "in_0_it_t" or "accum_t*"
+  std::string local_var; // e.g., "in_0"
+  std::string type_name; // e.g., "in_0_it_t" or "accum_t*"
 };
 
 // Generate code for an input iterator.
@@ -28,11 +27,14 @@ IteratorCode make_input_iterator(
   const std::string& state_param); // e.g., "d_in_0" (void* param name)
 
 // Generate code for an output iterator.
+// value_type_name: if non-empty, overrides accum_type_name as the element type
+// for the pointer/proxy.  Use this when the output element type differs from the
+// accumulator (e.g. item values in a key-value sort).
 IteratorCode make_output_iterator(
   cccl_iterator_t it,
   const std::string& accum_type_name,
   const std::string& struct_name,
   const std::string& var_name,
-  const std::string& state_param);
-
+  const std::string& state_param,
+  const std::string& value_type_name = "");
 } // namespace clangjit::codegen

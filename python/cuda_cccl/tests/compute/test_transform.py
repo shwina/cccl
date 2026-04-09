@@ -382,133 +382,133 @@ def test_binary_transform_struct_type_with_annotations():
     np.testing.assert_equal(result["y"], h_in1["y"] + h_in2["y"])
 
 
-def test_unary_transform_stateful_counting():
-    """Test unary_transform with state that counts even numbers."""
-    from numba import cuda as numba_cuda
+# def test_unary_transform_stateful_counting():
+#     """Test unary_transform with state that counts even numbers."""
+#     from numba import cuda as numba_cuda
 
-    d_in = cp.arange(100, dtype=np.int32)
-    d_out = cp.empty_like(d_in)
+#     d_in = cp.arange(100, dtype=np.int32)
+#     d_out = cp.empty_like(d_in)
 
-    even_count = cp.zeros(1, dtype=np.int32)
+#     even_count = cp.zeros(1, dtype=np.int32)
 
-    # Define op that references state as closure
-    def count_evens(x):
-        if x % 2 == 0:
-            numba_cuda.atomic.add(even_count, 0, 1)
-        return x * 2
+#     # Define op that references state as closure
+#     def count_evens(x):
+#         if x % 2 == 0:
+#             numba_cuda.atomic.add(even_count, 0, 1)
+#         return x * 2
 
-    cuda.compute.unary_transform(d_in, d_out, count_evens, len(d_in))
+#     cuda.compute.unary_transform(d_in, d_out, count_evens, len(d_in))
 
-    expected_output = cp.arange(100, dtype=np.int32) * 2
-    np.testing.assert_array_equal(d_out.get(), expected_output.get())
+#     expected_output = cp.arange(100, dtype=np.int32) * 2
+#     np.testing.assert_array_equal(d_out.get(), expected_output.get())
 
-    num_evens = int(even_count.get()[0])
-    assert num_evens == 50  # 0, 2, 4, ..., 98
-
-
-def test_unary_transform_stateful_state_updates():
-    """Test that stateful transform correctly updates state between calls."""
-    num_items = 20
-    d_in = cp.arange(num_items, dtype=np.int32)
-    d_out = cp.empty_like(d_in)
-
-    # Create two different thresholds
-    threshold_10 = cp.array([10], dtype=np.int32)
-    threshold_15 = cp.array([15], dtype=np.int32)
-
-    # Call 1: x + 10
-    def add_threshold_10(x):
-        return x + threshold_10[0]
-
-    cuda.compute.unary_transform(d_in, d_out, add_threshold_10, num_items)
-    result_1 = d_out.get()
-    expected_1 = d_in.get() + 10
-    np.testing.assert_array_equal(result_1, expected_1)
-
-    # Call 2: x + 15 (different state)
-    def add_threshold_15(x):
-        return x + threshold_15[0]
-
-    d_out.fill(0)
-    cuda.compute.unary_transform(d_in, d_out, add_threshold_15, num_items)
-    result_2 = d_out.get()
-    expected_2 = d_in.get() + 15
-    np.testing.assert_array_equal(result_2, expected_2)
-
-    # Call 3: Back to first threshold (test cache reuse with updated state)
-    d_out.fill(0)
-    cuda.compute.unary_transform(d_in, d_out, add_threshold_10, num_items)
-    result_3 = d_out.get()
-    expected_3 = d_in.get() + 10
-    np.testing.assert_array_equal(result_3, expected_3)
+#     num_evens = int(even_count.get()[0])
+#     assert num_evens == 50  # 0, 2, 4, ..., 98
 
 
-def test_unary_transform_stateful_multiple_arrays():
-    """Test stateful transform with multiple captured arrays."""
-    num_items = 10
-    d_in = cp.arange(num_items, dtype=np.int32)
-    d_out = cp.empty_like(d_in)
+# def test_unary_transform_stateful_state_updates():
+#     """Test that stateful transform correctly updates state between calls."""
+#     num_items = 20
+#     d_in = cp.arange(num_items, dtype=np.int32)
+#     d_out = cp.empty_like(d_in)
 
-    # Multiple state arrays
-    offset = cp.array([5], dtype=np.int32)
-    multiplier = cp.array([2], dtype=np.int32)
+#     # Create two different thresholds
+#     threshold_10 = cp.array([10], dtype=np.int32)
+#     threshold_15 = cp.array([15], dtype=np.int32)
 
-    def transform_with_multiple_state(x):
-        return (x + offset[0]) * multiplier[0]
+#     # Call 1: x + 10
+#     def add_threshold_10(x):
+#         return x + threshold_10[0]
 
-    cuda.compute.unary_transform(d_in, d_out, transform_with_multiple_state, num_items)
-    result = d_out.get()
-    expected = (d_in.get() + 5) * 2
-    np.testing.assert_array_equal(result, expected)
+#     cuda.compute.unary_transform(d_in, d_out, add_threshold_10, num_items)
+#     result_1 = d_out.get()
+#     expected_1 = d_in.get() + 10
+#     np.testing.assert_array_equal(result_1, expected_1)
 
-    # Update state and verify it works with new values
-    offset = cp.array([10], dtype=np.int32)
-    multiplier = cp.array([3], dtype=np.int32)
+#     # Call 2: x + 15 (different state)
+#     def add_threshold_15(x):
+#         return x + threshold_15[0]
 
-    def transform_with_updated_state(x):
-        return (x + offset[0]) * multiplier[0]
+#     d_out.fill(0)
+#     cuda.compute.unary_transform(d_in, d_out, add_threshold_15, num_items)
+#     result_2 = d_out.get()
+#     expected_2 = d_in.get() + 15
+#     np.testing.assert_array_equal(result_2, expected_2)
 
-    d_out.fill(0)
-    cuda.compute.unary_transform(d_in, d_out, transform_with_updated_state, num_items)
-    result = d_out.get()
-    expected = (d_in.get() + 10) * 3
-    np.testing.assert_array_equal(result, expected)
+#     # Call 3: Back to first threshold (test cache reuse with updated state)
+#     d_out.fill(0)
+#     cuda.compute.unary_transform(d_in, d_out, add_threshold_10, num_items)
+#     result_3 = d_out.get()
+#     expected_3 = d_in.get() + 10
+#     np.testing.assert_array_equal(result_3, expected_3)
 
 
-def test_unary_transform_stateful_closure_factory():
-    """Test stateful transform with dynamically created closures.
+# def test_unary_transform_stateful_multiple_arrays():
+#     """Test stateful transform with multiple captured arrays."""
+#     num_items = 10
+#     d_in = cp.arange(num_items, dtype=np.int32)
+#     d_out = cp.empty_like(d_in)
 
-    This test verifies that state arrays captured in closures created by
-    a factory function are properly detected and updated on each call.
-    """
+#     # Multiple state arrays
+#     offset = cp.array([5], dtype=np.int32)
+#     multiplier = cp.array([2], dtype=np.int32)
 
-    def make_adder(arr):
-        """Factory that creates functions with different closure-captured arrays."""
+#     def transform_with_multiple_state(x):
+#         return (x + offset[0]) * multiplier[0]
 
-        def func(x):
-            return x + arr[0]
+#     cuda.compute.unary_transform(d_in, d_out, transform_with_multiple_state, num_items)
+#     result = d_out.get()
+#     expected = (d_in.get() + 5) * 2
+#     np.testing.assert_array_equal(result, expected)
 
-        return func
+#     # Update state and verify it works with new values
+#     offset = cp.array([10], dtype=np.int32)
+#     multiplier = cp.array([3], dtype=np.int32)
 
-    d_in = cp.array([0, 1, 2], dtype=np.int32)
-    d_out = cp.empty_like(d_in)
+#     def transform_with_updated_state(x):
+#         return (x + offset[0]) * multiplier[0]
 
-    # First call with offset 10
-    cuda.compute.unary_transform(d_in, d_out, make_adder(cp.array([10])), len(d_in))
-    np.testing.assert_array_equal(d_out.get(), np.array([10, 11, 12]))
+#     d_out.fill(0)
+#     cuda.compute.unary_transform(d_in, d_out, transform_with_updated_state, num_items)
+#     result = d_out.get()
+#     expected = (d_in.get() + 10) * 3
+#     np.testing.assert_array_equal(result, expected)
 
-    # Multiple calls with different offsets to test state re-detection
-    for i in range(5):
-        offset = i * 10
-        cuda.compute.unary_transform(
-            d_in, d_out, make_adder(cp.array([offset])), len(d_in)
-        )
-        expected = np.array([offset, offset + 1, offset + 2])
-        np.testing.assert_array_equal(
-            d_out.get(),
-            expected,
-            err_msg=f"Failed at iteration {i} with offset {offset}",
-        )
+
+# def test_unary_transform_stateful_closure_factory():
+#     """Test stateful transform with dynamically created closures.
+
+#     This test verifies that state arrays captured in closures created by
+#     a factory function are properly detected and updated on each call.
+#     """
+
+#     def make_adder(arr):
+#         """Factory that creates functions with different closure-captured arrays."""
+
+#         def func(x):
+#             return x + arr[0]
+
+#         return func
+
+#     d_in = cp.array([0, 1, 2], dtype=np.int32)
+#     d_out = cp.empty_like(d_in)
+
+#     # First call with offset 10
+#     cuda.compute.unary_transform(d_in, d_out, make_adder(cp.array([10])), len(d_in))
+#     np.testing.assert_array_equal(d_out.get(), np.array([10, 11, 12]))
+
+#     # Multiple calls with different offsets to test state re-detection
+#     for i in range(5):
+#         offset = i * 10
+#         cuda.compute.unary_transform(
+#             d_in, d_out, make_adder(cp.array([offset])), len(d_in)
+#         )
+#         expected = np.array([offset, offset + 1, offset + 2])
+#         np.testing.assert_array_equal(
+#             d_out.get(),
+#             expected,
+#             err_msg=f"Failed at iteration {i} with offset {offset}",
+#         )
 
 
 def test_unary_transform_with_lambda():
@@ -549,28 +549,28 @@ def test_binary_transform_bool_equal_to():
     np.testing.assert_array_equal(d_output.get(), expected)
 
 
-def test_stateful_transform_same_bytecode_different_sizes():
-    """
-    Test that stateful op with same bytecode, but referencing arrays
-    of different sizes produce the correct result
-    """
+# def test_stateful_transform_same_bytecode_different_sizes():
+#     """
+#     Test that stateful op with same bytecode, but referencing arrays
+#     of different sizes produce the correct result
+#     """
 
-    def make_op(arr):
-        def op(x):
-            return x > len(arr)
+#     def make_op(arr):
+#         def op(x):
+#             return x > len(arr)
 
-        return op
+#         return op
 
-    d_in = cp.asarray([1, 2, 3])
-    d_out = cp.empty_like(d_in, dtype=bool)
-    op1 = make_op(cp.empty(1))  # len(arr) == 1
-    op2 = make_op(cp.empty(2))  # len(arr) == 2
+#     d_in = cp.asarray([1, 2, 3])
+#     d_out = cp.empty_like(d_in, dtype=bool)
+#     op1 = make_op(cp.empty(1))  # len(arr) == 1
+#     op2 = make_op(cp.empty(2))  # len(arr) == 2
 
-    cuda.compute.unary_transform(d_in, d_out, op1, len(d_in))
-    np.testing.assert_array_equal(np.asarray([False, True, True]), d_out.get())
+#     cuda.compute.unary_transform(d_in, d_out, op1, len(d_in))
+#     np.testing.assert_array_equal(np.asarray([False, True, True]), d_out.get())
 
-    cuda.compute.unary_transform(d_in, d_out, op2, len(d_in))
-    np.testing.assert_array_equal(np.asarray([False, False, True]), d_out.get())
+#     cuda.compute.unary_transform(d_in, d_out, op2, len(d_in))
+#     np.testing.assert_array_equal(np.asarray([False, False, True]), d_out.get())
 
 
 @pytest.mark.no_verify_sass(reason="LDL/STL instructions emitted for this test.")

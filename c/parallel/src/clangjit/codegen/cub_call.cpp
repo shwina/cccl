@@ -110,8 +110,13 @@ std::string CubCall::source() const
         }
         else if constexpr (std::is_same_v<T, num_items_t>)
         {
-          params.push_back("unsigned long long num_items");
-          cub_args.push_back("(unsigned long long)num_items");
+          params.push_back(std::format("unsigned long long {}", a.name));
+          cub_args.push_back(std::format("(unsigned long long){}", a.name));
+        }
+        else if constexpr (std::is_same_v<T, stream_t>)
+        {
+          params.push_back("void* stream");
+          cub_args.push_back("(cudaStream_t)stream");
         }
         else if constexpr (std::is_same_v<T, input_t>)
         {
@@ -135,7 +140,11 @@ std::string CubCall::source() const
           auto var_name    = std::format("out_{}", idx);
           auto param_name  = std::format("d_out_{}", idx);
 
-          auto code = make_output_iterator(a.it, "accum_t", struct_name, var_name, param_name);
+          // Pass the iterator's own value type so multi-type outputs (e.g. item
+          // values in a key-value sort) use the correct element type rather than
+          // always defaulting to accum_t.
+          auto value_type = get_type_name(a.it.value_type.type);
+          auto code       = make_output_iterator(a.it, "accum_t", struct_name, var_name, param_name, value_type);
 
           preamble += code.preamble;
           params.push_back(std::format("void* {}", param_name));
@@ -154,6 +163,21 @@ std::string CubCall::source() const
 
           preamble += code.preamble;
           // Always emit op_state param for ABI stability (unused for stateless ops)
+          params.push_back(std::format("void* {}", state_param));
+          setup_lines.push_back(code.setup_code);
+          cub_args.push_back(var_name);
+        }
+        else if constexpr (std::is_same_v<T, cmp_t>)
+        {
+          auto idx          = op_count++;
+          auto functor_name = std::format("CmpOp_{}", idx);
+          auto var_name     = std::format("cmp_{}", idx);
+          auto state_param  = std::format("cmp_{}_state", idx);
+          bool has_bc       = BitcodeCollector::is_bitcode_op(a.op);
+
+          auto code = make_comparison_op(a.op, accum_type, functor_name, var_name, state_param, has_bc);
+
+          preamble += code.preamble;
           params.push_back(std::format("void* {}", state_param));
           setup_lines.push_back(code.setup_code);
           cub_args.push_back(var_name);
@@ -321,6 +345,10 @@ CubCallResult CubCall::compile(
         if constexpr (std::is_same_v<T, cccl_op_t>)
         {
           bitcode.add_op(a, std::format("op_{}", op_idx++));
+        }
+        else if constexpr (std::is_same_v<T, cmp_t>)
+        {
+          bitcode.add_op(a.op, std::format("cmp_{}", op_idx++));
         }
         else if constexpr (std::is_same_v<T, input_t>)
         {

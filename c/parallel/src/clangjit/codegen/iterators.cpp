@@ -108,17 +108,20 @@ IteratorCode make_output_iterator(
   const std::string& accum_type_name,
   const std::string& struct_name,
   const std::string& var_name,
-  const std::string& state_param)
+  const std::string& state_param,
+  const std::string& value_type_name)
 {
   IteratorCode result;
   result.local_var = var_name;
 
+  // Use value_type_name when provided; fall back to accum_type_name.
+  const std::string& elem_type = value_type_name.empty() ? accum_type_name : value_type_name;
+
   if (it.type == CCCL_POINTER)
   {
-    result.type_name = accum_type_name + "*";
-    result.preamble  = std::format("using {} = {}*;\n\n", struct_name, accum_type_name);
-    result.setup_code =
-      std::format("{} {} = static_cast<{}*>({});", struct_name, var_name, accum_type_name, state_param);
+    result.type_name  = elem_type + "*";
+    result.preamble   = std::format("using {} = {}*;\n\n", struct_name, elem_type);
+    result.setup_code = std::format("{} {} = static_cast<{}*>({});", struct_name, var_name, elem_type, state_param);
   }
   else
   {
@@ -143,7 +146,7 @@ IteratorCode make_output_iterator(
       "  }}\n"
       "}};\n",
       proxy_name,
-      accum_type_name,
+      elem_type,
       deref_name);
 
     result.preamble += std::format(
@@ -167,8 +170,8 @@ IteratorCode make_output_iterator(
       "  __device__ reference operator[](difference_type n) {{ return *(*this + n); }}\n"
       "}};\n\n",
       struct_name, // struct name
-      accum_type_name, // value_type
-      accum_type_name, // pointer
+      elem_type, // value_type
+      elem_type, // pointer
       proxy_name, // reference (proxy type)
       it.size, // state size
       struct_name, // operator+ return
