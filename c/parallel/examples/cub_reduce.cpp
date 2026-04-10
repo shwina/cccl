@@ -1,8 +1,12 @@
-#include "clangjit/config.hpp"
-#include "clangjit/jit_compiler.hpp"
+#define CCCL_C_EXPERIMENTAL 1
+
+#include <cccl/c/reduce.h>
+#include <cuda.h>
 #include <cuda_runtime.h>
+
 #include <iostream>
 #include <numeric>
+#include <vector>
 
 #define CUDA_CHECK(call)                                                       \
   do {                                                                         \
@@ -14,124 +18,117 @@
     }                                                                          \
   } while (0)
 
+#define CU_CHECK(call)                                                         \
+  do {                                                                         \
+    CUresult err = call;                                                       \
+    if (err != CUDA_SUCCESS) {                                                 \
+      const char* str = nullptr;                                               \
+      cuGetErrorString(err, &str);                                             \
+      std::cerr << "CU error at " << __FILE__ << ":" << __LINE__ << ": "       \
+                << (str ? str : "unknown") << "\n";                            \
+      return 1;                                                                \
+    }                                                                          \
+  } while (0)
+
 int main() {
-  // Define CUDA code that uses CUB DeviceReduce::Sum
-  const char *cuda_source = R"(
-#include <cuda_runtime.h>
-#include <cub/device/device_reduce.cuh>
+  // Initialize CUDA driver API (needed by cccl_device_reduce_build)
+  CU_CHECK(cuInit(0));
 
-#ifdef _WIN32
-#define CLANGJIT_EXPORT __declspec(dllexport)
-#else
-#define CLANGJIT_EXPORT
-#endif
+  // Get device compute capability
+  cudaDeviceProp prop;
+  CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
 
-extern "C" CLANGJIT_EXPORT int computeSum(int* d_input, int num_items, int* result) {
-    int* d_output = nullptr;
-    void* d_temp_storage = nullptr;
-    size_t temp_storage_bytes = 0;
-
-    // Allocate output
-    cudaError_t err = cudaMalloc(&d_output, sizeof(int));
-    if (err != cudaSuccess) return -1;
-
-    // Run sum reduction
-    err = cub::DeviceReduce::Sum(d_input, d_output, num_items);
-    if (err != cudaSuccess) {
-        cudaFree(d_output);
-        return -2;
-    }
-
-    // Synchronize
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        cudaFree(d_output);
-        return -3;
-    }
-
-    // Copy result back
-    err = cudaMemcpy(result, d_output, sizeof(int), cudaMemcpyDeviceToHost);
-    if (err != cudaSuccess) {
-        cudaFree(d_output);
-        return -4;
-    }
-
-    // Cleanup
-    cudaFree(d_output);
-
-    return 0;
-}
-)";
-
-  std::cout << "ClangJIT Example: CUB DeviceReduce::Sum\n\n";
-
-  // Create JIT compiler with default configuration
-  clangjit::CompilerConfig config = clangjit::detectDefaultConfig();
-  config.verbose = true;
-  config.trace_includes = true;
-
-  std::cout << "CUDA toolkit: " << config.cuda_toolkit_path << "\n";
-  std::cout << "SM version: " << config.sm_version << "\n\n";
-
-  clangjit::JITCompiler compiler(config);
-
-  // Compile the CUDA source
-  std::cout << "Compiling CUDA code with CUB...\n";
-  if (!compiler.compile(cuda_source)) {
-    std::cerr << "Compilation failed:\n" << compiler.getLastError() << "\n";
-    return 1;
-  }
-  std::cout << "Compilation successful!\n\n";
-
-  // Get the function pointer
-  auto computeSum =
-      compiler.getFunction<int (*)(int *, int, int *)>("computeSum");
-  if (!computeSum) {
-    std::cerr << "Failed to get function: " << compiler.getLastError() << "\n";
-    return 1;
-  }
+  std::cout << "CCCL C API Example: DeviceReduce Sum\n";
+  std::cout << "SM version: " << prop.major << "." << prop.minor << "\n\n";
 
   // Prepare test data
-  const int N = 1024;
+  const uint64_t N = 1024;
   std::vector<int> h_input(N);
-
-  // Initialize with values 1 to N
   std::iota(h_input.begin(), h_input.end(), 1);
-
-  // Expected sum: N*(N+1)/2
-  int expected_sum = N * (N + 1) / 2;
+  const int expected_sum = N * (N + 1) / 2;
 
   // Allocate device memory
-  int *d_input;
+  int* d_input = nullptr;
+  int* d_output = nullptr;
   CUDA_CHECK(cudaMalloc(&d_input, N * sizeof(int)));
-
-  // Copy data to device
+  CUDA_CHECK(cudaMalloc(&d_output, sizeof(int)));
   CUDA_CHECK(cudaMemcpy(d_input, h_input.data(), N * sizeof(int),
                         cudaMemcpyHostToDevice));
 
-  // Call the JIT-compiled function
-  std::cout << "Computing sum of " << N << " integers using CUB...\n";
+  // Set up input iterator (pointer)
+  cccl_type_info int_type{};
+  int_type.size = sizeof(int);
+  int_type.alignment = alignof(int);
+  int_type.type = CCCL_INT32;
+
+  cccl_iterator_t input_it{};
+  input_it.size = sizeof(int);
+  input_it.alignment = alignof(int);
+  input_it.type = CCCL_POINTER;
+  input_it.value_type = int_type;
+  input_it.state = d_input;
+
+  // Set up output iterator (pointer)
+  cccl_iterator_t output_it{};
+  output_it.size = sizeof(int);
+  output_it.alignment = alignof(int);
+  output_it.type = CCCL_POINTER;
+  output_it.value_type = int_type;
+  output_it.state = d_output;
+
+  // Set up the reduction operator (well-known plus)
+  cccl_op_t op{};
+  op.type = CCCL_PLUS;
+
+  // Set up initial value
+  int init_value = 0;
+  cccl_value_t init{};
+  init.type = int_type;
+  init.state = &init_value;
+
+  // Build the reduction algorithm
+  std::cout << "Building reduce algorithm...\n";
+
+  cccl_device_reduce_build_result_t build{};
+  CU_CHECK(cccl_device_reduce_build(&build, input_it, output_it, op, init,
+                                    CCCL_RUN_TO_RUN, prop.major, prop.minor,
+                                    nullptr, nullptr, nullptr,
+                                    nullptr, nullptr));
+  std::cout << "Build successful!\n\n";
+
+  // Query temp storage size
+  size_t temp_storage_bytes = 0;
+  CU_CHECK(cccl_device_reduce(build, nullptr, &temp_storage_bytes, input_it,
+                              output_it, N, op, init, nullptr));
+
+  // Allocate temp storage
+  void* d_temp = nullptr;
+  CUDA_CHECK(cudaMalloc(&d_temp, temp_storage_bytes));
+
+  // Run reduction
+  std::cout << "Computing sum of " << N << " integers...\n";
+  CU_CHECK(cccl_device_reduce(build, d_temp, &temp_storage_bytes, input_it,
+                              output_it, N, op, init, nullptr));
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  // Copy result back
   int result = 0;
-  int status = computeSum(d_input, N, &result);
+  CUDA_CHECK(
+      cudaMemcpy(&result, d_output, sizeof(int), cudaMemcpyDeviceToHost));
 
-  if (status != 0) {
-    std::cerr << "computeSum failed with status: " << status << "\n";
-    CUDA_CHECK(cudaFree(d_input));
-    return 1;
-  }
-
-  // Verify result
+  // Verify
   std::cout << "Result: " << result << " (expected: " << expected_sum << ")\n";
-
   bool success = (result == expected_sum);
   if (success) {
     std::cout << "Results verified successfully!\n";
   } else {
-    std::cerr << "Mismatch! Got " << result << " but expected " << expected_sum
-              << "\n";
+    std::cerr << "Mismatch!\n";
   }
 
   // Cleanup
+  CU_CHECK(cccl_device_reduce_cleanup(&build));
+  CUDA_CHECK(cudaFree(d_temp));
+  CUDA_CHECK(cudaFree(d_output));
   CUDA_CHECK(cudaFree(d_input));
 
   return success ? 0 : 1;
