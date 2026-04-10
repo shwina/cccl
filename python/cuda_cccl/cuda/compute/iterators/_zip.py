@@ -7,12 +7,31 @@
 from __future__ import annotations
 
 from textwrap import dedent
+from typing import List
 
 from .._bindings import Op, OpKind
 from .._cpp_compile import compile_cpp_as_source
 from ..types import struct
 from ._base import IteratorBase, compose_iterator_states
 from ._common import CUDA_PREAMBLE, ensure_iterator
+
+
+def _dedup_extra_ltoirs(child_ops: List[Op]) -> list:
+    """Collect ltoir bytes from child ops, deduplicating by symbol name.
+
+    When multiple child iterators share the same type (e.g. two PointerIterators
+    of float32), they produce ops with the same name and identical ltoir.
+    Linking the same bitcode module twice causes 'symbol multiply defined' errors,
+    so we skip any op whose name has already been seen.
+    """
+    seen: set = set()
+    result = []
+    for op in child_ops:
+        if op.name not in seen:
+            seen.add(op.name)
+            result.append(op.ltoir)
+            result.extend(op.extra_ltoirs)
+    return result
 
 
 class ZipIterator(IteratorBase):
@@ -117,10 +136,9 @@ class ZipIterator(IteratorBase):
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=code, code_type="cpp_source",
-            extra_ltoirs=[
-                ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
-            ],
+            ltoir=code,
+            code_type="cpp_source",
+            extra_ltoirs=_dedup_extra_ltoirs(child_ops),
         )
 
     def _make_input_deref_op(self) -> Op | None:
@@ -159,10 +177,9 @@ class ZipIterator(IteratorBase):
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=code, code_type="cpp_source",
-            extra_ltoirs=[
-                ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
-            ],
+            ltoir=code,
+            code_type="cpp_source",
+            extra_ltoirs=_dedup_extra_ltoirs(child_ops),
         )
 
     def _make_output_deref_op(self) -> Op | None:
@@ -201,10 +218,9 @@ class ZipIterator(IteratorBase):
         return Op(
             operator_type=OpKind.STATELESS,
             name=symbol,
-            ltoir=code, code_type="cpp_source",
-            extra_ltoirs=[
-                ltoir for op in child_ops for ltoir in [op.ltoir, *op.extra_ltoirs]
-            ],
+            ltoir=code,
+            code_type="cpp_source",
+            extra_ltoirs=_dedup_extra_ltoirs(child_ops),
         )
 
     @property

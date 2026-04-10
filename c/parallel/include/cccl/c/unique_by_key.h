@@ -27,12 +27,8 @@ typedef struct cccl_device_unique_by_key_build_result_t
   int cc;
   void* cubin;
   size_t cubin_size;
-  CUlibrary library;
-  CUkernel compact_init_kernel;
-  CUkernel sweep_kernel;
-  size_t description_bytes_per_tile;
-  size_t payload_bytes_per_tile;
-  void* runtime_policy;
+  void* jit_compiler;
+  void* unique_by_key_fn;
 } cccl_device_unique_by_key_build_result_t;
 
 CCCL_C_API CUresult cccl_device_unique_by_key_build(
@@ -48,7 +44,8 @@ CCCL_C_API CUresult cccl_device_unique_by_key_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path);
+  const char* ctk_path,
+  const char* clang_path);
 
 // Extended version with build configuration
 CCCL_C_API CUresult cccl_device_unique_by_key_build_ex(
@@ -65,6 +62,7 @@ CCCL_C_API CUresult cccl_device_unique_by_key_build_ex(
   const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config);
 
 CCCL_C_API CUresult cccl_device_unique_by_key(

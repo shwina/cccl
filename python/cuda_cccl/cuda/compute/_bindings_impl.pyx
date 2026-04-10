@@ -1669,7 +1669,7 @@ cdef extern from "cccl/c/unique_by_key.h":
         cccl_iterator_t d_values_out,
         cccl_iterator_t d_num_selected_out,
         cccl_op_t comparison_op,
-        int, int, const char *, const char *, const char *, const char *
+        int, int, const char *, const char *, const char *, const char *, const char *
     ) nogil
 
     cdef CUresult cccl_device_unique_by_key(
@@ -1711,6 +1711,7 @@ cdef class DeviceUniqueByKeyBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         memset(&self.build_data, 0, sizeof(cccl_device_unique_by_key_build_result_t))
         with nogil:
@@ -1728,6 +1729,7 @@ cdef class DeviceUniqueByKeyBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(
@@ -1802,7 +1804,7 @@ cdef extern from "cccl/c/radix_sort.h":
         cccl_iterator_t d_values_in,
         cccl_op_t decomposer,
         const char* decomposer_return_type,
-        int, int, const char *, const char *, const char *, const char *
+        int, int, const char *, const char *, const char *, const char *, const char *
     ) nogil
 
     cdef CUresult cccl_device_radix_sort(
@@ -1853,6 +1855,7 @@ cdef class DeviceRadixSortBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         memset(&self.build_data, 0, sizeof(cccl_device_radix_sort_build_result_t))
         with nogil:
@@ -1869,6 +1872,7 @@ cdef class DeviceRadixSortBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(
@@ -2147,7 +2151,7 @@ cdef extern from "cccl/c/histogram.h":
         int64_t num_rows,
         int64_t row_stride_samples,
         bint is_evenly_segmented,
-        int, int, const char *, const char *, const char *, const char *
+        int, int, const char *, const char *, const char *, const char *, const char *
     ) nogil
 
     cdef CUresult cccl_device_histogram_even(
@@ -2201,6 +2205,7 @@ cdef class DeviceHistogramBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         memset(&self.build_data, 0, sizeof(cccl_device_histogram_build_result_t))
         with nogil:
@@ -2221,6 +2226,7 @@ cdef class DeviceHistogramBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(
@@ -2415,7 +2421,7 @@ cdef extern from "cccl/c/three_way_partition.h":
         cccl_iterator_t d_num_selected_out,
         cccl_op_t select_first_part_op,
         cccl_op_t select_second_part_op,
-        int, int, const char *, const char *, const char *, const char *
+        int, int, const char *, const char *, const char *, const char *, const char *
     ) nogil
 
     CUresult cccl_device_three_way_partition(
@@ -2467,6 +2473,7 @@ cdef class DeviceThreeWayPartitionBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         memset(&self.build_data, 0, sizeof(cccl_device_three_way_partition_build_result_t))
         with nogil:
@@ -2485,6 +2492,7 @@ cdef class DeviceThreeWayPartitionBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(
@@ -2554,7 +2562,7 @@ cdef extern from "cccl/c/segmented_sort.h":
         cccl_iterator_t d_keys_out,
         cccl_iterator_t begin_offset_in,
         cccl_iterator_t end_offset_in,
-        int, int, const char *, const char *, const char *, const char *
+        int, int, const char *, const char *, const char *, const char *, const char *
     ) nogil
 
     cdef CUresult cccl_device_segmented_sort(
@@ -2604,6 +2612,7 @@ cdef class DeviceSegmentedSortBuildResult:
         cdef const char *thrust_path = common_data.thrust_path_get_c_str()
         cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
         cdef const char *ctk_path = common_data.ctk_path_get_c_str()
+        cdef const char *clang_path = common_data.clang_path_get_c_str()
 
         memset(&self.build_data, 0, sizeof(cccl_device_segmented_sort_build_result_t))
         with nogil:
@@ -2620,6 +2629,7 @@ cdef class DeviceSegmentedSortBuildResult:
                 thrust_path,
                 libcudacxx_path,
                 ctk_path,
+                clang_path,
             )
         if status != 0:
             raise RuntimeError(

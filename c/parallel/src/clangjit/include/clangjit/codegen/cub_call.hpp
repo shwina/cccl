@@ -100,6 +100,14 @@ inline force_accum_type_t force_accum_type(cccl_type_info t)
   return {t};
 }
 
+// pred(): shorthand for a unary bool predicate operator (e.g. for partition).
+// Equivalent to unary_op with out_type = bool.
+// Generates: bool operator()(const item_t& a) const { ... }
+inline unary_op_t pred(cccl_op_t op, cccl_type_info item_t)
+{
+  return {op, item_t, cccl_type_info{sizeof(bool), alignof(bool), CCCL_BOOLEAN}};
+}
+
 // Argument variant: everything that can appear in .with()
 using Arg =
   std::variant<temp_storage_t,

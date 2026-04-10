@@ -28,20 +28,12 @@ typedef struct cccl_device_radix_sort_build_result_t
   int cc;
   void* cubin;
   size_t cubin_size;
-  CUlibrary library;
+  void* jit_compiler;
+  void* sort_fn;
   cccl_type_info key_type;
   cccl_type_info value_type;
-  CUkernel single_tile_kernel;
-  CUkernel upsweep_kernel;
-  CUkernel alt_upsweep_kernel;
-  CUkernel scan_bins_kernel;
-  CUkernel downsweep_kernel;
-  CUkernel alt_downsweep_kernel;
-  CUkernel histogram_kernel;
-  CUkernel exclusive_sum_kernel;
-  CUkernel onesweep_kernel;
   cccl_sort_order_t order;
-  void* runtime_policy;
+  int keys_only; /* 1 if keys-only sort, 0 if key-value pairs */
 } cccl_device_radix_sort_build_result_t;
 
 CCCL_C_API CUresult cccl_device_radix_sort_build(
@@ -56,7 +48,8 @@ CCCL_C_API CUresult cccl_device_radix_sort_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path);
+  const char* ctk_path,
+  const char* clang_path);
 
 // Extended version with build configuration
 CCCL_C_API CUresult cccl_device_radix_sort_build_ex(
@@ -72,6 +65,7 @@ CCCL_C_API CUresult cccl_device_radix_sort_build_ex(
   const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config);
 
 CCCL_C_API CUresult cccl_device_radix_sort(

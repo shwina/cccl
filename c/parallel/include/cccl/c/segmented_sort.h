@@ -28,19 +28,12 @@ typedef struct cccl_device_segmented_sort_build_result_t
   int cc;
   void* cubin;
   size_t cubin_size;
-  CUlibrary library;
+  void* jit_compiler;
+  void* sort_fn;
   cccl_type_info key_type;
-  cccl_type_info offset_type;
-  cccl_op_t large_segments_selector_op;
-  cccl_op_t small_segments_selector_op;
-  CUkernel segmented_sort_fallback_kernel;
-  CUkernel segmented_sort_kernel_small;
-  CUkernel segmented_sort_kernel_large;
-  CUkernel three_way_partition_init_kernel;
-  CUkernel three_way_partition_kernel;
-  void* runtime_policy;
-  void* partition_runtime_policy;
+  cccl_type_info value_type;
   cccl_sort_order_t order;
+  int keys_only; /* 1 if keys-only sort, 0 if key-value pairs */
 } cccl_device_segmented_sort_build_result_t;
 
 // TODO return a union of nvtx/cuda/nvrtc errors or a string?
@@ -56,9 +49,10 @@ CCCL_C_API CUresult cccl_device_segmented_sort_build(
   const char* cub_path,
   const char* thrust_path,
   const char* libcudacxx_path,
-  const char* ctk_path);
+  const char* ctk_path,
+  const char* clang_path);
 
-// Extended version with build configuration (mirrors radix_sort build_ex)
+// Extended version with build configuration
 CCCL_C_API CUresult cccl_device_segmented_sort_build_ex(
   cccl_device_segmented_sort_build_result_t* build,
   cccl_sort_order_t sort_order,
@@ -72,6 +66,7 @@ CCCL_C_API CUresult cccl_device_segmented_sort_build_ex(
   const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
+  const char* clang_path,
   cccl_build_config* config);
 
 CCCL_C_API CUresult cccl_device_segmented_sort(
