@@ -257,7 +257,7 @@ CUresult cccl_device_segmented_sort(
   uint64_t num_segments,
   cccl_iterator_t start_offset_in,
   cccl_iterator_t end_offset_in,
-  bool /*is_overwrite_okay*/,
+  bool is_overwrite_okay,
   int* selector,
   CUstream stream)
 {
@@ -302,7 +302,7 @@ CUresult cccl_device_segmented_sort(
 
     if (selector)
     {
-      *selector = 0; // copy variant always writes to d_keys_out
+      *selector = is_overwrite_okay ? 1 : 0;
     }
 
     return (status == 0) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;

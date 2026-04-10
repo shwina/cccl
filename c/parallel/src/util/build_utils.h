@@ -81,10 +81,9 @@ inline std::string parse_ctk_root(const char* ctk_path)
   return p;
 }
 
-// Build a JITCompiler from the standard set of path parameters.
-// Mirrors the configuration logic in CubCall::compile() so custom JIT sources
-// (segmented_sort, radix_sort, histogram) behave identically.
-inline clangjit::JITCompiler* make_jit_compiler(
+// Build a CompilerConfig from the standard set of path parameters.
+// Mirrors the configuration logic in CubCall::compile().
+inline clangjit::CompilerConfig make_jit_config(
   int cc_major,
   int cc_minor,
   const char* clang_path,
@@ -153,7 +152,21 @@ inline clangjit::JITCompiler* make_jit_compiler(
       }
     }
   }
-  return new clangjit::JITCompiler(jit_config);
+  return jit_config;
+}
+
+// Build a JITCompiler from the standard set of path parameters.
+inline clangjit::JITCompiler* make_jit_compiler(
+  int cc_major,
+  int cc_minor,
+  const char* clang_path,
+  const char* ctk_root,
+  const char* cccl_include_path,
+  cccl_build_config* config,
+  const char* entry_point_name = nullptr)
+{
+  return new clangjit::JITCompiler(
+    make_jit_config(cc_major, cc_minor, clang_path, ctk_root, cccl_include_path, config, entry_point_name));
 }
 
 // Compile a CUDA source string and return (compiler, fn_ptr, cubin).

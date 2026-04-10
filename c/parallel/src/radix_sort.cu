@@ -262,7 +262,7 @@ CUresult cccl_device_radix_sort(
   uint64_t num_items,
   int begin_bit,
   int end_bit,
-  bool /*is_overwrite_okay*/,
+  bool is_overwrite_okay,
   int* selector,
   CUstream stream)
 {
@@ -305,7 +305,10 @@ CUresult cccl_device_radix_sort(
 
     if (selector)
     {
-      *selector = 0; // copy variant always writes to d_keys_out
+      // Copy variant always writes to d_keys_out (= d_buffers[1] in DoubleBuffer mode).
+      // When is_overwrite_okay (DoubleBuffer mode), the caller interprets selector as an
+      // index into d_buffers, so 1 means "result is in the other/output buffer".
+      *selector = is_overwrite_okay ? 1 : 0;
     }
 
     return (status == 0) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;

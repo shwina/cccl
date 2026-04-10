@@ -14,6 +14,8 @@
 #include <string>
 
 #include <cccl/c/histogram.h>
+#include <clangjit/codegen/bitcode.hpp>
+#include <clangjit/codegen/iterators.hpp>
 #include <clangjit/codegen/types.hpp>
 #include <clangjit/jit_compiler.hpp>
 #include <util/build_utils.h>
@@ -27,7 +29,7 @@ using namespace clangjit::codegen;
 //
 //   int cccl_jit_histogram_even(
 //       void* d_temp_storage, size_t* temp_storage_bytes,
-//       void* d_samples_ptr,        // sample_t*
+//       void* d_samples_ptr,        // raw pointer (CCCL_POINTER) or state bytes (CCCL_ITERATOR)
 //       void* d_histogram_ptr,      // counter_t*
 //       void* num_levels_host_ptr,  // int* (host pointer to num_output_levels)
 //       void* lower_level_host_ptr, // level_t* (host pointer)
@@ -48,13 +50,22 @@ static const char* k_export_macro = R"(
 )";
 
 static std::string make_histogram_even_source(
-  const std::string& sample_type, const std::string& counter_type, const std::string& level_type)
+  cccl_iterator_t d_samples,
+  const std::string& sample_type,
+  const std::string& counter_type,
+  const std::string& level_type)
 {
+  // Generate iterator setup for the samples input (handles pointer and custom iterators).
+  auto it_code =
+    make_input_iterator(d_samples, sample_type, sample_type, "samples_it_t", "samples_it", "d_samples_ptr");
+
   return std::format(
     R"SRC(
 #include <cuda_runtime.h>
+#include <cuda/std/iterator>
 #include <cub/device/device_histogram.cuh>
 {0}
+{1}
 extern "C" EXPORT int cccl_jit_histogram_even(
     void* d_temp_storage, size_t* temp_storage_bytes,
     void* d_samples_ptr,
@@ -67,9 +78,11 @@ extern "C" EXPORT int cccl_jit_histogram_even(
     long long row_stride_samples,
     void* stream)
 {{
-    using sample_t  = {1};
-    using counter_t = {2};
-    using level_t   = {3};
+    using sample_t  = {2};
+    using counter_t = {3};
+    using level_t   = {4};
+
+    {5}
 
     int num_levels = 0;
     __builtin_memcpy(&num_levels, num_levels_host_ptr, sizeof(int));
@@ -83,7 +96,7 @@ extern "C" EXPORT int cccl_jit_histogram_even(
 
     cudaError_t err = cub::DeviceHistogram::HistogramEven(
         d_temp_storage, *temp_storage_bytes,
-        static_cast<const sample_t*>(d_samples_ptr),
+        samples_it,
         static_cast<counter_t*>(d_histogram_ptr),
         num_levels, lower_level, upper_level,
         static_cast<long long>(num_row_pixels),
@@ -94,9 +107,11 @@ extern "C" EXPORT int cccl_jit_histogram_even(
 }}
 )SRC",
     k_export_macro,
+    it_code.preamble,
     sample_type,
     counter_type,
-    level_type);
+    level_type,
+    it_code.setup_code);
 }
 
 // ---------------------------------------------------------------------------
@@ -168,26 +183,47 @@ try
     level_type = sample_type;
   }
 
-  std::string source = make_histogram_even_source(sample_type, counter_type, level_type);
+  std::string source = make_histogram_even_source(d_samples, sample_type, counter_type, level_type);
 
-  auto jit = cccl::detail::compile_jit_source(
-    source, "cccl_jit_histogram_even", cc_major, cc_minor, clang_path, ctk_root, cccl_include_path, config);
-  if (!jit.compiler)
+  // Build compiler config and link any iterator bitcode (e.g. for ConstantIterator).
+  auto jit_config = cccl::detail::make_jit_config(
+    cc_major, cc_minor, clang_path, ctk_root, cccl_include_path, config, "cccl_jit_histogram_even");
   {
-    return CUDA_ERROR_UNKNOWN;
+    BitcodeCollector bitcode(jit_config, reinterpret_cast<uintptr_t>(build_ptr));
+    bitcode.add_iterator(d_samples, "samples");
+    // bitcode files are written to jit_config.device_bitcode_files; cleanup temp files after compile
+    auto* compiler = new clangjit::JITCompiler(jit_config);
+    if (!compiler->compile(source))
+    {
+      fprintf(stderr, "\nJIT compilation failed: %s\n", compiler->getLastError().c_str());
+      delete compiler;
+      bitcode.cleanup();
+      return CUDA_ERROR_UNKNOWN;
+    }
+    bitcode.cleanup();
+
+    void* fn_ptr = compiler->getFunction<void*>("cccl_jit_histogram_even");
+    if (!fn_ptr)
+    {
+      fprintf(stderr,
+              "\nJIT symbol lookup failed for 'cccl_jit_histogram_even': %s\n",
+              compiler->getLastError().c_str());
+      delete compiler;
+      return CUDA_ERROR_UNKNOWN;
+    }
+
+    build_ptr->cc           = cc_major * 10 + cc_minor;
+    build_ptr->cubin        = cccl::detail::copy_cubin(compiler->getCubin(), &build_ptr->cubin_size);
+    build_ptr->jit_compiler = compiler;
+    build_ptr->histogram_fn = fn_ptr;
+    build_ptr->counter_type = d_output_histograms.value_type;
+    build_ptr->level_type   = lower_level.type;
+    build_ptr->sample_type  = d_samples.value_type;
+    build_ptr->num_channels        = num_channels;
+    build_ptr->num_active_channels = num_active_channels;
+
+    return CUDA_SUCCESS;
   }
-
-  build_ptr->cc                  = cc_major * 10 + cc_minor;
-  build_ptr->cubin               = cccl::detail::copy_cubin(jit.cubin, &build_ptr->cubin_size);
-  build_ptr->jit_compiler        = jit.compiler;
-  build_ptr->histogram_fn        = jit.fn_ptr;
-  build_ptr->counter_type        = d_output_histograms.value_type;
-  build_ptr->level_type          = lower_level.type;
-  build_ptr->sample_type         = d_samples.value_type;
-  build_ptr->num_channels        = num_channels;
-  build_ptr->num_active_channels = num_active_channels;
-
-  return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
