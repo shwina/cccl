@@ -75,9 +75,45 @@ inline future_val_t future_val(cccl_type_info t)
   return {t};
 }
 
+// unary_op_t: wraps a cccl_op_t used as a unary transform operator (T -> U).
+// Carries the input/output type info so the functor can be typed correctly.
+struct unary_op_t
+{
+  cccl_op_t op;
+  cccl_type_info in_type;
+  cccl_type_info out_type;
+};
+inline unary_op_t unary_op(cccl_op_t op, cccl_type_info in_t, cccl_type_info out_t)
+{
+  return {op, in_t, out_t};
+}
+
+// force_accum_type_t: overrides the accumulator type resolved by find_accum_type.
+// Use when the natural accum type (first input) differs from the desired type.
+// Generates no code — only influences type resolution.
+struct force_accum_type_t
+{
+  cccl_type_info type;
+};
+inline force_accum_type_t force_accum_type(cccl_type_info t)
+{
+  return {t};
+}
+
 // Argument variant: everything that can appear in .with()
-using Arg = std::
-  variant<temp_storage_t, temp_bytes_t, num_items_t, stream_t, input_t, output_t, cccl_op_t, cmp_t, future_val_t, cccl_value_t>;
+using Arg =
+  std::variant<temp_storage_t,
+               temp_bytes_t,
+               num_items_t,
+               stream_t,
+               input_t,
+               output_t,
+               cccl_op_t,
+               cmp_t,
+               unary_op_t,
+               future_val_t,
+               cccl_value_t,
+               force_accum_type_t>;
 
 // Result of a successful compilation.
 struct CubCallResult
@@ -107,6 +143,14 @@ public:
     return *this;
   }
 
+  // Wrap all input iterators in cuda::std::make_tuple() in the generated CUB call.
+  // Required for cub::DeviceTransform::Transform with multiple inputs.
+  CubCall& use_tuple_inputs()
+  {
+    tuple_inputs_ = true;
+    return *this;
+  }
+
   // Generate the complete CUDA source string (useful for debugging).
   std::string source() const;
 
@@ -124,5 +168,6 @@ private:
   std::string cub_function_;
   std::string fn_name_ = "cccl_jit_fn";
   std::vector<Arg> args_;
+  bool tuple_inputs_ = false;
 };
 } // namespace clangjit::codegen

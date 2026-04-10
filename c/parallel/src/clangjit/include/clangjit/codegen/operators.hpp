@@ -1,18 +1,17 @@
 #pragma once
 
-#include <cccl/c/types.h>
-
 #include <string>
+
+#include <cccl/c/types.h>
 
 namespace clangjit::codegen
 {
-
 // Result of generating operator code.
 struct OperatorCode
 {
-  std::string preamble;   // extern decl + functor struct (goes at file scope)
+  std::string preamble; // extern decl + functor struct (goes at file scope)
   std::string setup_code; // initialization inside function body
-  std::string local_var;  // e.g., "op_0"
+  std::string local_var; // e.g., "op_0"
 };
 
 // Generate a well-known binary operation body (e.g., CCCL_PLUS → "*out = *a + *b").
@@ -30,6 +29,17 @@ OperatorCode make_binary_op(
   const std::string& state_param, // e.g., "op_0_state" (void* param name)
   bool has_bitcode);
 
+// Generate code for a unary operator (transform).
+// Produces a functor with operator()(const in_type& a) const -> out_type.
+OperatorCode make_unary_op(
+  cccl_op_t op,
+  const std::string& in_type, // C++ type name for input operand
+  const std::string& out_type, // C++ type name for result
+  const std::string& functor_name, // e.g., "UnaryOp"
+  const std::string& var_name, // e.g., "op_0"
+  const std::string& state_param, // e.g., "op_0_state" (void* param name)
+  bool has_bitcode);
+
 // Generate code for a comparison operator (sort).
 // Same as binary op but the functor returns bool.
 OperatorCode make_comparison_op(
@@ -39,5 +49,4 @@ OperatorCode make_comparison_op(
   const std::string& var_name, // e.g., "cmp_0"
   const std::string& state_param, // e.g., "cmp_0_state"
   bool has_bitcode);
-
 } // namespace clangjit::codegen

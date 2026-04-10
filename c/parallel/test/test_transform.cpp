@@ -764,6 +764,7 @@ C2H_TEST("Transform works with C++ source operations using custom headers", "[tr
       build_info.get_thrust_path(),
       build_info.get_libcudacxx_path(),
       build_info.get_ctk_path(),
+      nullptr, // clang_path — auto-detect
       &config));
 
   // Execute the transform

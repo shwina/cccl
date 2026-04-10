@@ -37,6 +37,14 @@ namespace
 {
 cccl_type_info find_accum_type(const std::vector<Arg>& args)
 {
+  // Highest priority: explicit override
+  for (const auto& arg : args)
+  {
+    if (auto* fa = std::get_if<force_accum_type_t>(&arg))
+    {
+      return fa->type;
+    }
+  }
   // First: look for cccl_value_t (init value defines accum type)
   for (const auto& arg : args)
   {
@@ -190,6 +198,38 @@ std::string CubCall::source() const
           setup_lines.push_back(code.setup_code);
           cub_args.push_back(var_name);
         }
+        else if constexpr (std::is_same_v<T, unary_op_t>)
+        {
+          auto idx          = op_count++;
+          auto functor_name = std::format("UnaryOp_{}", idx);
+          auto var_name     = std::format("op_{}", idx);
+          auto state_param  = std::format("op_{}_state", idx);
+          bool has_bc       = BitcodeCollector::is_bitcode_op(a.op);
+
+          // For unknown types the iterators use accum_t as fallback; the unary
+          // op functor must use the same names so CUB can match the types.
+          std::string in_type = get_type_name(a.in_type.type);
+          if (in_type.empty())
+          {
+            in_type = "accum_t";
+          }
+          std::string out_type = get_type_name(a.out_type.type);
+          if (out_type.empty())
+          {
+            out_type = "accum_t";
+          }
+
+          auto code = make_unary_op(a.op, in_type, out_type, functor_name, var_name, state_param, has_bc);
+
+          preamble += code.preamble;
+          params.push_back(std::format("void* {}", state_param));
+          setup_lines.push_back(code.setup_code);
+          cub_args.push_back(var_name);
+        }
+        else if constexpr (std::is_same_v<T, force_accum_type_t>)
+        {
+          // No-op: only influences accum type resolution, generates no code.
+        }
         else if constexpr (std::is_same_v<T, future_val_t>)
         {
           auto idx        = val_count++;
@@ -218,6 +258,47 @@ std::string CubCall::source() const
       arg);
   }
 
+  // When tuple_inputs_ is set, replace the individual input cub_args with a
+  // single make_tuple(...) expression covering all of them.
+  if (tuple_inputs_ && in_count > 1)
+  {
+    // Collect the first in_count cub_args that correspond to input iterators.
+    // Inputs are emitted first among iterator args, so they occupy the leading
+    // cub_args entries (after temp_storage/temp_bytes if present).
+    // Reconstruct: find and replace the in_0..in_N-1 vars with make_tuple.
+    std::vector<std::string> input_vars;
+    std::vector<std::string> other_args;
+    for (const auto& a : cub_args)
+    {
+      // Input vars are named "in_0", "in_1", etc.
+      if (a.size() >= 3 && a.substr(0, 3) == "in_" && std::isdigit(a[3]))
+      {
+        input_vars.push_back(a);
+      }
+      else
+      {
+        other_args.push_back(a);
+      }
+    }
+    std::string tuple_arg = "::cuda::std::make_tuple(";
+    for (size_t i = 0; i < input_vars.size(); ++i)
+    {
+      if (i)
+      {
+        tuple_arg += ", ";
+      }
+      tuple_arg += input_vars[i];
+    }
+    tuple_arg += ")";
+    // Rebuild cub_args: replace all in_* with the single tuple arg (at original position of in_0)
+    cub_args.clear();
+    cub_args.push_back(tuple_arg);
+    for (const auto& a : other_args)
+    {
+      cub_args.push_back(a);
+    }
+  }
+
   // Assemble the complete source
   std::string src;
   src += "#include <cuda_runtime.h>\n";
@@ -225,6 +306,10 @@ std::string CubCall::source() const
   src += "#include <cuda/std/iterator>\n";
   src += "#include <cuda/std/functional>\n";
   src += "#include <cuda/functional>\n";
+  if (tuple_inputs_)
+  {
+    src += "#include <cuda/std/tuple>\n";
+  }
   src += std::format("#include <{}>\n\n", include_);
 
   src += preamble;
@@ -370,6 +455,10 @@ CubCallResult CubCall::compile(
         else if constexpr (std::is_same_v<T, cmp_t>)
         {
           bitcode.add_op(a.op, std::format("cmp_{}", op_idx++));
+        }
+        else if constexpr (std::is_same_v<T, unary_op_t>)
+        {
+          bitcode.add_op(a.op, std::format("op_{}", op_idx++));
         }
         else if constexpr (std::is_same_v<T, input_t>)
         {

@@ -95,7 +95,8 @@ struct scan_build
       cub_path,
       thrust_path,
       libcudacxx_path,
-      ctk_path);
+      ctk_path,
+      nullptr);
   }
 
   CUresult operator()(
@@ -127,7 +128,8 @@ struct scan_build
       cub_path,
       thrust_path,
       libcudacxx_path,
-      ctk_path);
+      ctk_path,
+      nullptr);
   }
 
   CUresult operator()(
@@ -159,7 +161,8 @@ struct scan_build
       cub_path,
       thrust_path,
       libcudacxx_path,
-      ctk_path);
+      ctk_path,
+      nullptr);
   }
 
   static bool should_check_sass(int cc_major)
@@ -736,6 +739,7 @@ C2H_TEST("Scan works with C++ source operations using custom headers", "[scan]")
       build_info.get_thrust_path(),
       build_info.get_libcudacxx_path(),
       build_info.get_ctk_path(),
+      nullptr, // clang_path — auto-detect
       &config));
 
   // Execute the scan

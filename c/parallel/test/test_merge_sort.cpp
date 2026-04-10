@@ -63,7 +63,8 @@ struct merge_sort_build
     cccl_op_t op,
     Rest... rest) const noexcept
   {
-    return cccl_device_merge_sort_build(build_ptr, input_keys, input_items, output_keys, output_items, op, rest...);
+    return cccl_device_merge_sort_build(
+      build_ptr, input_keys, input_items, output_keys, output_items, op, rest..., nullptr);
   }
 
   static constexpr bool should_check_sass(int)
@@ -607,6 +608,7 @@ C2H_TEST("MergeSort works with C++ source operations using custom headers", "[me
       build_info.get_thrust_path(),
       build_info.get_libcudacxx_path(),
       build_info.get_ctk_path(),
+      nullptr, // clang_path — auto-detect
       &config));
 
   // Execute the merge sort
