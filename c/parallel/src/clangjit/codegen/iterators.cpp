@@ -1,6 +1,7 @@
 #include <format>
 
 #include <clangjit/codegen/iterators.hpp>
+#include <clangjit/codegen/types.hpp>
 
 namespace clangjit::codegen
 {
@@ -17,17 +18,22 @@ IteratorCode make_input_iterator(
 
   if (it.type == CCCL_POINTER)
   {
-    // For pointer iterators, the input type matches value_type
+    // For pointer iterators, the element type is value_type.
+    // When value_type_name is empty (unknown/struct type), resolve it from the iterator's
+    // value_type info to get a correctly-sized storage struct — falling back to accum_t
+    // would use the wrong element size if the value type differs from the accumulator.
+    std::string elem_type;
     if (value_type_name.empty())
     {
-      result.type_name = accum_type_name + "*";
-      result.preamble  = std::format("using {} = {}*;\n\n", struct_name, accum_type_name);
+      auto elem_alias = struct_name + "_elem_t";
+      elem_type       = resolve_type(it.value_type, elem_alias.c_str(), result.preamble);
     }
     else
     {
-      result.type_name = value_type_name + "*";
-      result.preamble  = std::format("using {} = {}*;\n\n", struct_name, value_type_name);
+      elem_type = value_type_name;
     }
+    result.type_name = elem_type + "*";
+    result.preamble += std::format("using {} = {}*;\n\n", struct_name, elem_type);
     result.setup_code = std::format("{} {} = static_cast<{}>({}); ", struct_name, var_name, struct_name, state_param);
   }
   else
@@ -114,14 +120,28 @@ IteratorCode make_output_iterator(
   IteratorCode result;
   result.local_var = var_name;
 
-  // Use value_type_name when provided; fall back to accum_type_name.
-  const std::string& elem_type = value_type_name.empty() ? accum_type_name : value_type_name;
+  // For custom iterators the element type comes from the dereference function so the
+  // accum_t fallback is fine; for pointer iterators we resolve the actual value_type
+  // below to get the correct element size.
+  const std::string elem_type = value_type_name.empty() ? accum_type_name : value_type_name;
 
   if (it.type == CCCL_POINTER)
   {
-    result.type_name  = elem_type + "*";
-    result.preamble   = std::format("using {} = {}*;\n\n", struct_name, elem_type);
-    result.setup_code = std::format("{} {} = static_cast<{}*>({});", struct_name, var_name, elem_type, state_param);
+    // When value_type_name is empty (unknown/struct type), resolve from the iterator's own
+    // value_type info so the element size is correct — not from accum_t which may differ.
+    std::string ptr_elem_type;
+    if (value_type_name.empty())
+    {
+      auto elem_alias = struct_name + "_elem_t";
+      ptr_elem_type   = resolve_type(it.value_type, elem_alias.c_str(), result.preamble);
+    }
+    else
+    {
+      ptr_elem_type = value_type_name;
+    }
+    result.type_name = ptr_elem_type + "*";
+    result.preamble += std::format("using {} = {}*;\n\n", struct_name, ptr_elem_type);
+    result.setup_code = std::format("{} {} = static_cast<{}*>({});", struct_name, var_name, ptr_elem_type, state_param);
   }
   else
   {

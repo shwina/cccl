@@ -2,6 +2,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <map>
 #include <stdexcept>
 
 #include <clangjit/codegen/bitcode.hpp>
@@ -107,6 +108,38 @@ std::string CubCall::source() const
   }
   preamble += std::format("using accum_t = {};\n\n", accum_type);
 
+  // Shared alias cache: (size, alignment) → type name.
+  // Multiple iterators with the same unknown struct layout must share a single C++
+  // type so that CUB can move data between them (e.g. merge sort block loads).
+  std::map<std::pair<size_t, size_t>, std::string> struct_type_map;
+  int struct_type_counter = 0;
+
+  // Return a stable C++ element-type name for an iterator's value_type:
+  //   - Known C type  → C++ keyword (e.g. "int", "float")
+  //   - Struct matching accum_t → "accum_t"  (preserves operator compatibility)
+  //   - Other struct  → shared alias for this (size, alignment) layout
+  auto iter_elem_type_name = [&](const cccl_type_info& vt) -> std::string {
+    auto name = get_type_name(vt.type);
+    if (!name.empty())
+    {
+      return name;
+    }
+    if (vt.size == accum_info.size && vt.alignment == accum_info.alignment && vt.type == accum_info.type)
+    {
+      return "accum_t";
+    }
+    auto key = std::make_pair(vt.size, vt.alignment);
+    auto it  = struct_type_map.find(key);
+    if (it != struct_type_map.end())
+    {
+      return it->second;
+    }
+    auto alias = std::format("__cccl_struct_{}_t", struct_type_counter++);
+    preamble += make_storage_type(alias.c_str(), vt.size, vt.alignment);
+    struct_type_map[key] = alias;
+    return alias;
+  };
+
   // Pass 2: process each argument
   for (const auto& arg : args_)
   {
@@ -141,7 +174,7 @@ std::string CubCall::source() const
           auto var_name    = std::format("in_{}", idx);
           auto param_name  = std::format("d_in_{}", idx);
 
-          auto value_type = get_type_name(a.it.value_type.type);
+          auto value_type = iter_elem_type_name(a.it.value_type);
           auto code       = make_input_iterator(a.it, value_type, "accum_t", struct_name, var_name, param_name);
 
           preamble += code.preamble;
@@ -156,10 +189,7 @@ std::string CubCall::source() const
           auto var_name    = std::format("out_{}", idx);
           auto param_name  = std::format("d_out_{}", idx);
 
-          // Pass the iterator's own value type so multi-type outputs (e.g. item
-          // values in a key-value sort) use the correct element type rather than
-          // always defaulting to accum_t.
-          auto value_type = get_type_name(a.it.value_type.type);
+          auto value_type = iter_elem_type_name(a.it.value_type);
           auto code       = make_output_iterator(a.it, "accum_t", struct_name, var_name, param_name, value_type);
 
           preamble += code.preamble;
