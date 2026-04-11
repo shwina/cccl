@@ -1,5 +1,6 @@
 #define CCCL_C_EXPERIMENTAL 1
 
+#include <chrono>
 #include <cccl/c/reduce.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -90,10 +91,18 @@ int main() {
   std::cout << "Building reduce algorithm...\n";
 
   cccl_device_reduce_build_result_t build{};
+  std::chrono::high_resolution_clock::time_point build_start =
+      std::chrono::high_resolution_clock::now();
   CU_CHECK(cccl_device_reduce_build(&build, input_it, output_it, op, init,
                                     CCCL_RUN_TO_RUN, prop.major, prop.minor,
                                     nullptr, nullptr, nullptr,
                                     nullptr, nullptr));
+  std::chrono::high_resolution_clock::time_point build_end =
+      std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> build_time =
+      build_end - build_start;
+  std::cout << "Build time (ms): " << build_time.count() << "\n";
+
   std::cout << "Build successful!\n\n";
 
   // Query temp storage size
