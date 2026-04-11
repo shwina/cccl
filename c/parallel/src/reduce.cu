@@ -30,8 +30,8 @@ CUresult cccl_device_reduce_build_ex(
   cccl_determinism_t determinism,
   int cc_major,
   int cc_minor,
-  const char* /*cub_path*/,
-  const char* /*thrust_path*/,
+  const char* cub_path,
+  const char* thrust_path,
   const char* libcudacxx_path,
   const char* ctk_path,
   const char* clang_path,
@@ -65,19 +65,69 @@ try
     }
     // The Python layer passes the include directory itself; the C++ config
     // expects the toolkit root (parent of include/).
+    // Walk up from the include dir until we find the directory containing
+    // nvvm/libdevice/ — that is the real toolkit root.  This handles both
+    //   /usr/local/cuda/include           -> /usr/local/cuda
+    //   /usr/local/cuda/targets/.../include -> /usr/local/cuda
     std::filesystem::path p(ctk_root_str);
     if (p.filename() == "include")
     {
-      ctk_root_str = p.parent_path().string();
+      p = p.parent_path();
     }
+    for (auto candidate = p; candidate.has_parent_path() && candidate != candidate.parent_path();
+         candidate = candidate.parent_path())
+    {
+      if (std::filesystem::exists(candidate / "nvvm" / "libdevice"))
+      {
+        p = candidate;
+        break;
+      }
+    }
+    ctk_root_str = p.string();
     ctk_root = ctk_root_str.c_str();
   }
+
+  // Collect any extra -I paths from the legacy cub_path / thrust_path arguments.
+  std::vector<std::string> extra_include_strs;
+  std::vector<const char*> extra_include_ptrs;
+  for (const char* path : {cub_path, thrust_path})
+  {
+    if (path && path[0] != '\0')
+    {
+      std::string s = path;
+      if (s.substr(0, 2) == "-I")
+      {
+        s = s.substr(2);
+      }
+      extra_include_strs.push_back(std::move(s));
+    }
+  }
+  for (const auto& s : extra_include_strs)
+  {
+    extra_include_ptrs.push_back(s.c_str());
+  }
+
+  // Merge with any user-provided build config.
+  cccl_build_config merged_config{};
+  if (build_config)
+  {
+    merged_config = *build_config;
+  }
+  // Append legacy include dirs to any existing extra_include_dirs.
+  std::vector<const char*> all_include_ptrs;
+  for (size_t i = 0; i < merged_config.num_extra_include_dirs; ++i)
+  {
+    all_include_ptrs.push_back(merged_config.extra_include_dirs[i]);
+  }
+  all_include_ptrs.insert(all_include_ptrs.end(), extra_include_ptrs.begin(), extra_include_ptrs.end());
+  merged_config.extra_include_dirs    = all_include_ptrs.data();
+  merged_config.num_extra_include_dirs = all_include_ptrs.size();
 
   auto result = CubCall::from("cub/device/device_reduce.cuh")
                   .run("cub::DeviceReduce::Reduce")
                   .name("cccl_jit_reduce")
                   .with(temp_storage, temp_bytes, in(input_it), out(output_it), num_items, op, init)
-                  .compile(cc_major, cc_minor, clang_path, build_config, ctk_root, cccl_include_path);
+                  .compile(cc_major, cc_minor, clang_path, &merged_config, ctk_root, cccl_include_path);
 
   build->cc               = cc_major * 10 + cc_minor;
   build->cubin            = nullptr;
