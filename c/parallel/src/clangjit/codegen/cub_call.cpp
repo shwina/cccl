@@ -238,6 +238,7 @@ CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_pat
   jit_config.sm_version     = cc_major * 10 + cc_minor;
   jit_config.verbose        = false;
   jit_config.entry_point_name = fn_name_;
+
   if (clang_path)
   {
     jit_config.clang_headers_path = clang_path;
@@ -299,6 +300,7 @@ CubCallResult CubCall::compile(int cc_major, int cc_minor, const char* clang_pat
         }
       }
     }
+    jit_config.enable_pch = config->enable_pch != 0;
   }
 
   // 2. Auto-collect bitcode from ops and iterators

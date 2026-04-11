@@ -4,6 +4,7 @@
 #include <cccl/c/reduce.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <filesystem>
 
 #include <iostream>
 #include <numeric>
@@ -90,13 +91,24 @@ int main() {
   // Build the reduction algorithm
   std::cout << "Building reduce algorithm...\n";
 
+  cccl_build_config build_config{};
+  build_config.enable_pch = 1;
+
+  int sm = prop.major * 10 + prop.minor;
+  auto pch_dir = std::filesystem::temp_directory_path() / "clangjit_pch";
+  auto device_pch = pch_dir / ("device_sm" + std::to_string(sm) + ".pch");
+  auto host_pch   = pch_dir / ("host_sm" + std::to_string(sm) + ".pch");
+  bool pch_cached = std::filesystem::exists(device_pch) && std::filesystem::exists(host_pch);
+  std::cout << "PCH cache: " << pch_dir.string()
+            << (pch_cached ? " (hit)" : " (miss, will generate)") << "\n";
+
   cccl_device_reduce_build_result_t build{};
   std::chrono::high_resolution_clock::time_point build_start =
       std::chrono::high_resolution_clock::now();
-  CU_CHECK(cccl_device_reduce_build(&build, input_it, output_it, op, init,
-                                    CCCL_RUN_TO_RUN, prop.major, prop.minor,
-                                    nullptr, nullptr, nullptr,
-                                    nullptr, nullptr));
+  CU_CHECK(cccl_device_reduce_build_ex(&build, input_it, output_it, op, init,
+                                       CCCL_RUN_TO_RUN, prop.major, prop.minor,
+                                       nullptr, nullptr, nullptr,
+                                       nullptr, nullptr, &build_config));
   std::chrono::high_resolution_clock::time_point build_end =
       std::chrono::high_resolution_clock::now();
   std::chrono::duration<double, std::milli> build_time =

@@ -22,6 +22,7 @@ struct CompilerConfig {
     bool trace_includes = false;  // Show all included headers during compilation (for debugging header search)
     bool keep_artifacts = false;  // Keep compiled artifacts for inspection (PTX, object files, etc.)
     std::string entry_point_name;  // Name of the exported entry point function (used for post-link optimization)
+    bool enable_pch = false;       // Cache precompiled headers on disk to speed up repeated builds
 };
 
 // Auto-detect CUDA toolkit and create default configuration

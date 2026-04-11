@@ -4,6 +4,7 @@
 #include <clang/Basic/DiagnosticOptions.h>
 #include <clang/Basic/TargetInfo.h>
 #include <clang/CodeGen/CodeGenAction.h>
+#include <clang/Frontend/FrontendActions.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
 #include <clang/Frontend/FrontendOptions.h>
@@ -131,9 +132,95 @@ static std::string findCudartDllName(const std::string &cuda_toolkit_path) {
 }
 #endif
 
+// Headers precompiled into the PCH cache.  Covers the algorithms exposed
+// by the C parallel library so that a single pair of PCH files (device +
+// host) is reused across reduce, adjacent-difference, etc.
+static constexpr const char *pch_preamble_source =
+    "#include <cuda_runtime.h>\n"
+    "#include <cuda/std/iterator>\n"
+    "#include <cuda/std/functional>\n"
+    "#include <cuda/functional>\n"
+    "#include <cub/device/device_reduce.cuh>\n"
+    "#include <cub/device/device_adjacent_difference.cuh>\n";
+
 class CUDACompiler::Impl {
 public:
   Impl() {}
+
+  // Get the persistent PCH cache directory.
+  static std::filesystem::path getPCHCacheDir() {
+    auto dir = std::filesystem::temp_directory_path() / "clangjit_pch";
+    std::filesystem::create_directories(dir);
+    return dir;
+  }
+
+  // Get a persistent cache path for a PCH file.
+  static std::string getPCHPath(const std::string &kind, int sm_version) {
+    return (getPCHCacheDir() / (kind + "_sm" + std::to_string(sm_version) + ".pch")).string();
+  }
+
+  // Get the persistent path for the PCH preamble source file.
+  // The PCH stores a reference to this path, so it must be stable across runs.
+  static std::string getPCHSourcePath(const std::string &kind, int sm_version) {
+    return (getPCHCacheDir() / (kind + "_sm" + std::to_string(sm_version) + "_preamble.cu")).string();
+  }
+
+  // Write preamble to a persistent file and generate a PCH from it.
+  // arg_strings[0] will be replaced with the persistent preamble path.
+  bool generatePCH(const std::string &pch_source,
+                   const std::string &pch_source_path,
+                   const std::string &pch_output_path,
+                   std::vector<std::string> arg_strings,
+                   std::string &diagnostics) {
+    // Write preamble to the persistent source path
+    {
+      std::ofstream f(pch_source_path);
+      if (!f) {
+        diagnostics += "Failed to write PCH preamble to " + pch_source_path;
+        return false;
+      }
+      f << pch_source;
+    }
+
+    // Replace the source file arg with the persistent path
+    arg_strings[0] = pch_source_path;
+
+    std::vector<const char *> args;
+    for (const auto &arg : arg_strings)
+      args.push_back(arg.c_str());
+
+    std::string diag_output;
+    llvm::raw_string_ostream diag_stream(diag_output);
+    clang::DiagnosticOptions diag_opts;
+    diag_opts.ShowColors = false;
+    auto *diag_printer =
+        new clang::TextDiagnosticPrinter(diag_stream, diag_opts);
+    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_ids(
+        new clang::DiagnosticIDs());
+    clang::DiagnosticsEngine diag_engine(diag_ids, diag_opts, diag_printer);
+
+    clang::CompilerInstance compiler;
+    auto &invocation = compiler.getInvocation();
+
+    if (!clang::CompilerInvocation::CreateFromArgs(invocation, args,
+                                                   diag_engine)) {
+      diag_stream.flush();
+      diagnostics += diag_output + "\nFailed to create PCH compiler invocation";
+      return false;
+    }
+
+    compiler.createDiagnostics(diag_engine.getClient(), false);
+    compiler.createFileManager();
+    compiler.getFrontendOpts().OutputFile = pch_output_path;
+
+    clang::GeneratePCHAction pch_action;
+    bool success = compiler.ExecuteAction(pch_action);
+
+    diag_stream.flush();
+    diagnostics += diag_output;
+
+    return success;
+  }
 
   llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem>
   createVFSWithSource(const std::string &source_code,
@@ -281,6 +368,23 @@ public:
     arg_strings.push_back("-x");
     arg_strings.push_back("cuda");
 
+    // --- PCH: ensure device PCH exists ---
+    std::string device_pch_path;
+    if (config.enable_pch) {
+      device_pch_path = getPCHPath("device", config.sm_version);
+      if (!std::filesystem::exists(device_pch_path)) {
+        auto pch_src_path = getPCHSourcePath("device", config.sm_version);
+        std::string pch_diag;
+        if (!generatePCH(pch_preamble_source, pch_src_path,
+                         device_pch_path, arg_strings, pch_diag)) {
+          diagnostics += "Device PCH generation failed: " + pch_diag + "\n";
+          device_pch_path.clear();
+        } else if (config.verbose) {
+          diagnostics += "Generated device PCH: " + device_pch_path + "\n";
+        }
+      }
+    }
+
     std::vector<const char *> args;
     for (const auto &arg : arg_strings) {
       args.push_back(arg.c_str());
@@ -313,6 +417,12 @@ public:
       diagnostics += diag_output;
       diagnostics += "\nFailed to create device compiler invocation";
       return false;
+    }
+
+    // --- PCH: load cached device PCH ---
+    if (!device_pch_path.empty() &&
+        std::filesystem::exists(device_pch_path)) {
+      invocation.getPreprocessorOpts().ImplicitPCHInclude = device_pch_path;
     }
 
     auto vfs = createVFSWithSource(source_code, source_file);
@@ -742,8 +852,6 @@ public:
       }
     }
 
-    arg_strings.push_back("-fcuda-include-gpubinary");
-    arg_strings.push_back(fatbin_path);
     arg_strings.push_back("-fdeprecated-macro");
     arg_strings.push_back("--offload-new-driver");
     arg_strings.push_back("-fskip-odr-check-in-gmf");
@@ -756,6 +864,27 @@ public:
 
     arg_strings.push_back("-x");
     arg_strings.push_back("cuda");
+
+    // --- PCH: ensure host PCH exists (before adding fatbin-specific args) ---
+    std::string host_pch_path;
+    if (config.enable_pch) {
+      host_pch_path = getPCHPath("host", config.sm_version);
+      if (!std::filesystem::exists(host_pch_path)) {
+        auto pch_src_path = getPCHSourcePath("host", config.sm_version);
+        std::string pch_diag;
+        if (!generatePCH(pch_preamble_source, pch_src_path,
+                         host_pch_path, arg_strings, pch_diag)) {
+          diagnostics += "Host PCH generation failed: " + pch_diag + "\n";
+          host_pch_path.clear();
+        } else if (config.verbose) {
+          diagnostics += "Generated host PCH: " + host_pch_path + "\n";
+        }
+      }
+    }
+
+    // Add fatbin embedding (per-build, not part of PCH)
+    arg_strings.push_back("-fcuda-include-gpubinary");
+    arg_strings.push_back(fatbin_path);
 
     std::vector<const char *> args;
     for (const auto &arg : arg_strings) {
@@ -789,6 +918,12 @@ public:
       diagnostics += diag_output;
       diagnostics += "\nFailed to create host compiler invocation";
       return false;
+    }
+
+    // --- PCH: load cached host PCH ---
+    if (!host_pch_path.empty() &&
+        std::filesystem::exists(host_pch_path)) {
+      invocation.getPreprocessorOpts().ImplicitPCHInclude = host_pch_path;
     }
 
     auto vfs = createVFSWithSource(source_code, source_file);
