@@ -116,6 +116,7 @@ typedef struct cccl_build_config
   const char** extra_include_dirs; // e.g., {"/path/to/my/headers"}
   size_t num_extra_include_dirs;
   int enable_pch; // Cache precompiled headers on disk to speed up repeated builds
+  int verbose; // Log PCH generation/usage and compiler args to build diagnostics
 } cccl_build_config;
 
 typedef enum cccl_iterator_kind_t

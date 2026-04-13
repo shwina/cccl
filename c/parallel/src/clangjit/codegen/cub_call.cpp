@@ -464,6 +464,7 @@ CubCallResult CubCall::compile(
       }
     }
     jit_config.enable_pch = config->enable_pch != 0;
+    jit_config.verbose    = config->verbose != 0;
   }
 
   // 2. Auto-collect bitcode from ops and iterators

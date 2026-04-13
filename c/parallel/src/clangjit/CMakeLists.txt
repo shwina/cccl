@@ -255,7 +255,7 @@ add_executable(
   example_cub_reduce
   ${CMAKE_CURRENT_SOURCE_DIR}/../../examples/cub_reduce.cpp
 )
-target_link_libraries(example_cub_reduce clangjit_lib)
+target_link_libraries(example_cub_reduce clangjit_lib cccl.c.parallel)
 if (NOT MSVC)
   target_compile_options(example_cub_reduce PRIVATE -fno-rtti)
 endif()

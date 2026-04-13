@@ -33,6 +33,7 @@ from cuda.cccl import get_include_paths  # type: ignore
 
 from . import types
 from ._bindings import (
+    BuildConfig,
     CommonData,
     Iterator,
     IteratorKind,
@@ -246,7 +247,9 @@ def _check_compile_result(cubin: bytes):
 _check_sass: bool = False
 
 
-def call_build(build_impl_fn: Callable, *args, **kwargs):
+def call_build(
+    build_impl_fn: Callable, *args, build_config: BuildConfig | None = None, **kwargs
+):
     """Calls given build_impl_fn callable while providing compute capability and paths
 
     Returns result of the call.
@@ -257,11 +260,20 @@ def call_build(build_impl_fn: Callable, *args, **kwargs):
     cub_path, thrust_path, libcudacxx_path, cuda_include_path, _ = get_includes()
     clang_path = get_clang_include_path()
     common_data = CommonData(
-        cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, cuda_include_path, clang_path
+        cc_major,
+        cc_minor,
+        cub_path,
+        thrust_path,
+        libcudacxx_path,
+        cuda_include_path,
+        clang_path,
     )
+    if build_config is None:
+        build_config = BuildConfig(enable_pch=True)
     result = build_impl_fn(
         *args,
         common_data,
+        build_config,
         **kwargs,
     )
 
