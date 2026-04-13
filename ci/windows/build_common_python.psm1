@@ -23,27 +23,27 @@ function Get-Python {
         $Env:PATH = $uvBin + ";" + $Env:PATH
     }
 
-    Write-Host "Installing Python $Version via uv..."
-    & uv python install $Version
+    Write-Host "Creating Python $Version venv via uv..."
+    $venvDir = Join-Path $HOME '.cccl-venv'
+    & uv venv --seed --python $Version $venvDir
     if ($LASTEXITCODE -ne 0) {
         throw [System.InvalidOperationException]::new(
-            "Failed to install Python $Version via uv."
+            "Failed to create Python $Version venv via uv."
         )
     }
 
-    $exe = (& uv python find $Version 2>&1).Trim()
-    if (-not $exe -or -not (Test-Path $exe)) {
+    $exe = Join-Path $venvDir 'Scripts\python.exe'
+    if (-not (Test-Path $exe)) {
         throw [System.InvalidOperationException]::new(
-            "Could not find Python $Version after uv install. Got: $exe"
+            "Could not find python.exe in venv at $exe"
         )
     }
 
     Write-Host "Python $Version at: $exe"
 
-    # Add python dir and Scripts dir to PATH so bare `python` and `pip` work.
-    $rootDir = Split-Path $exe
-    $scriptsDir = Join-Path $rootDir 'Scripts'
-    $Env:PATH = $rootDir + ";" + $scriptsDir + ";" + $Env:PATH
+    # Add venv Scripts dir to PATH so bare `python` and `pip` work.
+    $scriptsDir = Join-Path $venvDir 'Scripts'
+    $Env:PATH = $scriptsDir + ";" + $Env:PATH
 
     return $exe
 }
