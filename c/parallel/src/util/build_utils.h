@@ -16,6 +16,20 @@
 
 namespace cccl::detail
 {
+// Stable strings for NVRTC PCH flags — must not be temporaries since
+// NVRTC holds pointers to them for the lifetime of the compilation.
+inline const char* nvrtc_pch_flag()
+{
+  static const char flag[] = "-pch";
+  return flag;
+}
+
+inline const char* nvrtc_pch_dir_flag()
+{
+  static const char flag[] = "-pch-dir=/tmp/nvrtc_pch";
+  return flag;
+}
+
 /**
  * @brief Extends a vector of compilation arguments with extra flags and include directories from a build config
  *
@@ -36,6 +50,13 @@ inline void extend_args_with_build_config(std::vector<const char*>& args, const 
     {
       args.push_back("-I");
       args.push_back(config->extra_include_dirs[i]);
+    }
+    // Enable NVRTC automatic PCH mode: NVRTC will generate and reuse a PCH
+    // for the common preamble headers within this process's NVRTC instance.
+    if (config->enable_pch)
+    {
+      args.push_back(nvrtc_pch_flag());
+      args.push_back(nvrtc_pch_dir_flag());
     }
   }
 }

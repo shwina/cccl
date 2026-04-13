@@ -189,6 +189,11 @@ class CommonData:
     @property
     def ctk_path(self) -> str: ...
 
+class BuildConfig:
+    def __init__(self, enable_pch: bool = False): ...
+    @property
+    def enable_pch(self) -> bool: ...
+
 # ------------
 # DeviceReduce
 # ------------
@@ -202,6 +207,7 @@ class DeviceReduceBuildResult:
         h_init: Value,
         determinism: Determinism,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute(
         self,
@@ -240,6 +246,7 @@ class DeviceScanBuildResult:
         force_inclusive: bool,
         init_kind: InitKind,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute_inclusive(
         self,
@@ -311,6 +318,7 @@ class DeviceSegmentedReduceBuildResult:
         binary_op: Op,
         h_init: Value,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute(
         self,
@@ -340,6 +348,7 @@ class DeviceMergeSortBuildResult:
         d_out_items: Iterator,
         binary_op: Op,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute(
         self,
@@ -368,6 +377,7 @@ class DeviceUniqueByKeyBuildResult:
         d_num_selected_out: Iterator,
         binary_op: Op,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute(
         self,
@@ -388,7 +398,16 @@ class DeviceUniqueByKeyBuildResult:
 # -----------------
 
 class DeviceRadixSortBuildResult:
-    def __init__(self): ...
+    def __init__(
+        self,
+        order: SortOrder,
+        d_keys_in: Iterator,
+        d_values_in: Iterator,
+        decomposer_op: Op,
+        decomposer_return_type: bytes,
+        info: CommonData,
+        build_config: BuildConfig | None = None,
+    ): ...
     def compute(
         self,
         temp_storage_ptr: int | None,
@@ -417,6 +436,7 @@ class DeviceUnaryTransform:
         d_out: Iterator,
         op: Op,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute(
         self,
@@ -438,6 +458,7 @@ class DeviceBinaryTransform:
         d_out: Iterator,
         op: Op,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute(
         self,
@@ -465,6 +486,7 @@ class DeviceHistogramBuildResult:
         row_stride_samples: int,
         is_evenly_segmented: bool,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute_even(
         self,
@@ -492,6 +514,7 @@ class DeviceBinarySearchBuildResult:
         d_out: Iterator,
         comparison_op: Op,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute(
         self,
@@ -509,7 +532,16 @@ class DeviceBinarySearchBuildResult:
 # -----------------
 
 class DeviceSegmentedSortBuildResult:
-    def __init__(self): ...
+    def __init__(
+        self,
+        order: SortOrder,
+        d_keys_in: Iterator,
+        d_values_in: Iterator,
+        begin_offset_in: Iterator,
+        end_offset_in: Iterator,
+        info: CommonData,
+        build_config: BuildConfig | None = None,
+    ): ...
     def compute(
         self,
         temp_storage_ptr: int | None,
@@ -542,6 +574,7 @@ class DeviceThreeWayPartitionBuildResult:
         select_first_part_op: Op,
         select_second_part_op: Op,
         info: CommonData,
+        build_config: BuildConfig | None = None,
     ): ...
     def compute(
         self,
