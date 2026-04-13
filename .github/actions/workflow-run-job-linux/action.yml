@@ -83,6 +83,16 @@ runs:
         echo -e "\e[1;34mOverride matrix entry:\e[0m"
         echo -e "\e[1;34m    $matrix_job\e[0m"
 
+    - name: Restore kernel cache
+      if: ${{ contains(inputs.command, 'test_cuda_compute') }}
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ github.workspace }}/.kernel-cache
+        key: kernel-cache-cuda${{ inputs.cuda }}-${{ github.sha }}
+        restore-keys: |
+          kernel-cache-cuda${{ inputs.cuda }}-
+      continue-on-error: true
+
     - name: Run command # Do not change this step's name, it is checked in parse-job-times.py
       id: run
       shell: bash --noprofile --norc -euo pipefail {0}
@@ -201,6 +211,14 @@ runs:
 
         # Dump artifact matrix for upload step:
         printf "ARTIFACTS=%s\n" "$(ci/util/artifacts/upload/print_matrix.sh)" >> "${GITHUB_OUTPUT}"
+
+    - name: Save kernel cache
+      if: ${{ always() && contains(inputs.command, 'test_cuda_compute') }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ github.workspace }}/.kernel-cache
+        key: kernel-cache-cuda${{ inputs.cuda }}-${{ github.sha }}
+      continue-on-error: true
 
     - name: Upload job artifacts
       if: ${{ always() && steps.run.outputs.ARTIFACTS != '' && fromJson(steps.run.outputs.ARTIFACTS)[0] != null }}

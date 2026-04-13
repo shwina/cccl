@@ -25,6 +25,13 @@ fi
 CUDA_CCCL_WHEEL_PATH="$(ls /home/coder/cccl/wheelhouse/cuda_cccl-*.whl)"
 python -m pip install "${CUDA_CCCL_WHEEL_PATH}[test-cu${cuda_major_version}]"
 
+# In CI, store kernel cache inside the workspace (bind-mounted to host → GHA can persist it).
+# Outside CI, conftest.py defaults to /tmp/cuda-compute-kernel-cache.
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    export CUDA_COMPUTE_CACHE_DIR="/home/coder/cccl/.kernel-cache"
+    mkdir -p "${CUDA_COMPUTE_CACHE_DIR}"
+fi
+
 # Run tests for compute module
 cd "/home/coder/cccl/python/cuda_cccl/tests/"
 python -m pytest -n 6 -v compute/ -m "not large"
