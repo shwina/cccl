@@ -1,8 +1,31 @@
 import builtins
+import os
 
 import cupy as cp
 import numpy as np
 import pytest
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--kernel-cache-dir",
+        default=None,
+        metavar="DIR",
+        help="Directory for compiled kernel disk cache (default: /tmp/cuda-compute-kernel-cache). "
+        "Set to empty string to disable. Overrides CUDA_COMPUTE_CACHE_DIR.",
+    )
+
+
+def pytest_configure(config):
+    from cuda.compute._caching import set_cache_dir
+
+    cli_dir = config.getoption("--kernel-cache-dir", default=None)
+    if cli_dir is not None:
+        # Explicit CLI flag: empty string disables, any other value enables.
+        set_cache_dir(cli_dir if cli_dir else None)
+    elif "CUDA_COMPUTE_CACHE_DIR" not in os.environ:
+        # Neither CLI flag nor env var set: use a default persistent local cache.
+        set_cache_dir("/tmp/cuda-compute-kernel-cache")
 
 
 # Define a pytest fixture that returns random arrays with different dtypes

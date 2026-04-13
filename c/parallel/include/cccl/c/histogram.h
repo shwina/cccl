@@ -37,6 +37,10 @@ typedef struct cccl_device_histogram_build_result_t
   CUkernel init_kernel;
   CUkernel sweep_kernel;
   void* runtime_policy;
+  size_t runtime_policy_size;
+  // Lowered (mangled) kernel names, heap-allocated, freed by cccl_device_histogram_cleanup():
+  char* init_kernel_lowered_name;
+  char* sweep_kernel_lowered_name;
 } cccl_device_histogram_build_result_t;
 
 CCCL_C_API CUresult cccl_device_histogram_build(

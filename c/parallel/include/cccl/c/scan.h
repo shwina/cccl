@@ -39,6 +39,10 @@ typedef struct cccl_device_scan_build_result_t
   size_t description_bytes_per_tile;
   size_t payload_bytes_per_tile;
   void* runtime_policy;
+  size_t runtime_policy_size;
+  // Lowered (mangled) kernel names, heap-allocated, freed by cccl_device_scan_cleanup():
+  char* init_kernel_lowered_name;
+  char* scan_kernel_lowered_name;
 } cccl_device_scan_build_result_t;
 
 CCCL_C_API CUresult cccl_device_scan_build(

@@ -312,7 +312,16 @@ class CachableFunction:
         return hash(self._identity)
 
     def __repr__(self):
-        return str(self._func)
+        import hashlib
+
+        code = self._func.__code__
+        # Stable, address-independent repr for use in disk cache key hashing.
+        # Based on the function name and bytecode so that the same source
+        # function produces the same repr across processes.
+        digest = hashlib.sha256(
+            repr((self._func.__name__, code.co_code, code.co_consts)).encode()
+        ).hexdigest()[:16]
+        return f"CachableFunction<{self._func.__name__},{digest}>"
 
 
 # Register keyers for built-in types

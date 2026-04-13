@@ -543,6 +543,9 @@ class _StatelessOp(OpAdapter):
             self._cachable,
         )
 
+    def __repr__(self):
+        return f"_StatelessOp({self._cachable!r})"
+
     def get_return_type(self, input_types):
         return _infer_return_type(self._func, input_types)
 
@@ -886,6 +889,9 @@ class _StatefulOp(OpAdapter):
 
     def __eq__(self, other):
         return (self._cachable == other._cachable) and (self._state == other._state)
+
+    def __repr__(self):
+        return f"_StatefulOp({self._cachable!r}, {self._state.get_cache_key()!r})"
 
 
 def to_jit_op_adapter(op: Callable) -> OpAdapter:

@@ -383,12 +383,17 @@ __device__ consteval auto& policy_generator() {{
   using cub::detail::RuntimeUniqueByKeyAgentPolicy;
   auto ubk_policy = RuntimeUniqueByKeyAgentPolicy::from_json(runtime_policy, "UniqueByKeyPolicyT");
 
+  static_assert(std::is_trivially_copyable_v<unique_by_key::unique_by_key_runtime_tuning_policy>);
   build_ptr->cc                         = cc;
   build_ptr->cubin                      = (void*) result.data.release();
   build_ptr->cubin_size                 = result.size;
   build_ptr->description_bytes_per_tile = description_bytes_per_tile;
   build_ptr->payload_bytes_per_tile     = payload_bytes_per_tile;
-  build_ptr->runtime_policy             = new unique_by_key::unique_by_key_runtime_tuning_policy{ubk_policy};
+  build_ptr->runtime_policy             = std::malloc(sizeof(unique_by_key::unique_by_key_runtime_tuning_policy));
+  build_ptr->runtime_policy_size        = sizeof(unique_by_key::unique_by_key_runtime_tuning_policy);
+  std::memcpy(build_ptr->runtime_policy, &ubk_policy, sizeof(unique_by_key::unique_by_key_runtime_tuning_policy));
+  build_ptr->compact_init_kernel_lowered_name = strdup(compact_init_kernel_lowered_name.c_str());
+  build_ptr->sweep_kernel_lowered_name        = strdup(sweep_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
@@ -512,7 +517,9 @@ try
   }
 
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
-  std::unique_ptr<char[]> policy(reinterpret_cast<char*>(build_ptr->runtime_policy));
+  std::free(build_ptr->runtime_policy);
+  std::free(build_ptr->compact_init_kernel_lowered_name);
+  std::free(build_ptr->sweep_kernel_lowered_name);
   check(cuLibraryUnload(build_ptr->library));
 
   return CUDA_SUCCESS;

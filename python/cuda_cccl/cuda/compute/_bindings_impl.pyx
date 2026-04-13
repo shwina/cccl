@@ -1174,8 +1174,23 @@ cdef extern from "cccl/c/scan.h":
     ctypedef bint _Bool
 
     cdef struct cccl_device_scan_build_result_t 'cccl_device_scan_build_result_t':
-        const char* cubin
+        int cc
+        void* cubin
         size_t cubin_size
+        CUlibrary library
+        cccl_type_info input_type
+        cccl_type_info output_type
+        cccl_type_info accumulator_type
+        CUkernel init_kernel
+        CUkernel scan_kernel
+        bint force_inclusive
+        cccl_init_kind_t init_kind
+        size_t description_bytes_per_tile
+        size_t payload_bytes_per_tile
+        void* runtime_policy
+        size_t runtime_policy_size
+        char* init_kernel_lowered_name
+        char* scan_kernel_lowered_name
 
     cdef CUresult cccl_device_scan_build(
         cccl_device_scan_build_result_t*,
@@ -1257,32 +1272,37 @@ cdef class DeviceScanBuildResult:
 
     def __cinit__(
         DeviceScanBuildResult self,
-        Iterator d_in,
-        Iterator d_out,
-        Op op,
-        TypeInfo init_type,
-        bint force_inclusive,
-        cccl_init_kind_t init_kind,
-        CommonData common_data
+        d_in=None,
+        d_out=None,
+        op=None,
+        init_type=None,
+        force_inclusive=None,
+        init_kind=None,
+        common_data=None,
     ):
-        cdef CUresult status = -1
-        cdef int cc_major = common_data.get_cc_major()
-        cdef int cc_minor = common_data.get_cc_minor()
-        cdef const char *cub_path = common_data.cub_path_get_c_str()
-        cdef const char *thrust_path = common_data.thrust_path_get_c_str()
-        cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
-        cdef const char *ctk_path = common_data.ctk_path_get_c_str()
         memset(&self.build_data, 0, sizeof(cccl_device_scan_build_result_t))
+        if d_in is None:
+            return  # deserialization path: fields populated by _deserialize()
+
+        cdef CUresult status = -1
+        cdef bint c_force_inclusive = force_inclusive
+        cdef cccl_init_kind_t c_init_kind = <cccl_init_kind_t>init_kind
+        cdef int cc_major = (<CommonData>common_data).get_cc_major()
+        cdef int cc_minor = (<CommonData>common_data).get_cc_minor()
+        cdef const char *cub_path = (<CommonData>common_data).cub_path_get_c_str()
+        cdef const char *thrust_path = (<CommonData>common_data).thrust_path_get_c_str()
+        cdef const char *libcudacxx_path = (<CommonData>common_data).libcudacxx_path_get_c_str()
+        cdef const char *ctk_path = (<CommonData>common_data).ctk_path_get_c_str()
 
         with nogil:
             status = cccl_device_scan_build(
                 &self.build_data,
-                d_in.iter_data,
-                d_out.iter_data,
-                op.op_data,
-                init_type.type_info,
-                force_inclusive,
-                init_kind,
+                (<Iterator>d_in).iter_data,
+                (<Iterator>d_out).iter_data,
+                (<Op>op).op_data,
+                (<TypeInfo>init_type).type_info,
+                c_force_inclusive,
+                c_init_kind,
                 cc_major,
                 cc_minor,
                 cub_path,
@@ -1474,6 +1494,98 @@ cdef class DeviceScanBuildResult:
             <const char*>self.build_data.cubin,
             self.build_data.cubin_size
         )
+
+    def _serialize(self):
+        policy_bytes = PyBytes_FromStringAndSize(
+            <const char*>self.build_data.runtime_policy,
+            self.build_data.runtime_policy_size
+        )
+        return {
+            "cubin": PyBytes_FromStringAndSize(<const char*>self.build_data.cubin, self.build_data.cubin_size),
+            "cc": self.build_data.cc,
+            "input_type": {"type": <int>self.build_data.input_type.type,
+                           "size": self.build_data.input_type.size,
+                           "alignment": self.build_data.input_type.alignment},
+            "output_type": {"type": <int>self.build_data.output_type.type,
+                            "size": self.build_data.output_type.size,
+                            "alignment": self.build_data.output_type.alignment},
+            "accumulator_type": {"type": <int>self.build_data.accumulator_type.type,
+                                 "size": self.build_data.accumulator_type.size,
+                                 "alignment": self.build_data.accumulator_type.alignment},
+            "force_inclusive": bool(self.build_data.force_inclusive),
+            "init_kind": <int>self.build_data.init_kind,
+            "description_bytes_per_tile": self.build_data.description_bytes_per_tile,
+            "payload_bytes_per_tile": self.build_data.payload_bytes_per_tile,
+            "policy_bytes": base64.b64encode(policy_bytes).decode("ascii"),
+            "init_lowered": (<bytes>self.build_data.init_kernel_lowered_name).decode(),
+            "scan_lowered": (<bytes>self.build_data.scan_kernel_lowered_name).decode(),
+        }
+
+    @staticmethod
+    def _deserialize(data):
+        cdef DeviceScanBuildResult obj = DeviceScanBuildResult.__new__(DeviceScanBuildResult)
+
+        cubin_bytes = data["cubin"]
+        cdef size_t cubin_size = len(cubin_bytes)
+        cdef const void* cubin_ptr = <const void*><const char*>cubin_bytes
+
+        init_bytes = data["init_lowered"].encode()
+        scan_bytes = data["scan_lowered"].encode()
+
+        cdef const char* knames[2]
+        knames[0] = <const char*>init_bytes
+        knames[1] = <const char*>scan_bytes
+
+        cdef CUkernel khandles[2]
+        khandles[0] = NULL
+        khandles[1] = NULL
+
+        cdef void* cubin_copy = NULL
+        cdef CUlibrary library = NULL
+        cdef CUresult status = cccl_load_cubin_and_get_kernels(
+            cubin_ptr, cubin_size, &cubin_copy, &library, knames, khandles, 2
+        )
+        if status != 0:
+            raise RuntimeError(f"Failed loading cubin in _deserialize, error: {status}")
+
+        obj.build_data.cubin      = cubin_copy
+        obj.build_data.cubin_size = cubin_size
+        obj.build_data.library    = library
+        obj.build_data.cc         = data["cc"]
+        obj.build_data.init_kernel = khandles[0]
+        obj.build_data.scan_kernel = khandles[1]
+
+        it = data["input_type"]
+        obj.build_data.input_type.type      = <cccl_type_enum>it["type"]
+        obj.build_data.input_type.size      = it["size"]
+        obj.build_data.input_type.alignment = it["alignment"]
+        ot = data["output_type"]
+        obj.build_data.output_type.type      = <cccl_type_enum>ot["type"]
+        obj.build_data.output_type.size      = ot["size"]
+        obj.build_data.output_type.alignment = ot["alignment"]
+        at = data["accumulator_type"]
+        obj.build_data.accumulator_type.type      = <cccl_type_enum>at["type"]
+        obj.build_data.accumulator_type.size      = at["size"]
+        obj.build_data.accumulator_type.alignment = at["alignment"]
+
+        obj.build_data.force_inclusive            = <bint>data["force_inclusive"]
+        obj.build_data.init_kind                  = <cccl_init_kind_t>data["init_kind"]
+        obj.build_data.description_bytes_per_tile = data["description_bytes_per_tile"]
+        obj.build_data.payload_bytes_per_tile     = data["payload_bytes_per_tile"]
+
+        policy_bytes = base64.b64decode(data["policy_bytes"])
+        cdef size_t policy_size = len(policy_bytes)
+        cdef void* policy_copy = malloc(policy_size)
+        if policy_copy == NULL:
+            raise MemoryError("Failed to allocate runtime_policy")
+        memcpy(policy_copy, <const void*><const char*>policy_bytes, policy_size)
+        obj.build_data.runtime_policy      = policy_copy
+        obj.build_data.runtime_policy_size = policy_size
+
+        obj.build_data.init_kernel_lowered_name = strdup(<const char*>init_bytes)
+        obj.build_data.scan_kernel_lowered_name = strdup(<const char*>scan_bytes)
+
+        return obj
 
 # -----------------------
 #   DeviceSegmentedReduce
@@ -1905,8 +2017,18 @@ cdef class DeviceMergeSortBuildResult:
 
 cdef extern from "cccl/c/unique_by_key.h":
     cdef struct cccl_device_unique_by_key_build_result_t 'cccl_device_unique_by_key_build_result_t':
-        const char* cubin
+        int cc
+        void* cubin
         size_t cubin_size
+        CUlibrary library
+        CUkernel compact_init_kernel
+        CUkernel sweep_kernel
+        size_t description_bytes_per_tile
+        size_t payload_bytes_per_tile
+        void* runtime_policy
+        size_t runtime_policy_size
+        char* compact_init_kernel_lowered_name
+        char* sweep_kernel_lowered_name
 
 
     cdef CUresult cccl_device_unique_by_key_build(
@@ -1944,32 +2066,35 @@ cdef class DeviceUniqueByKeyBuildResult:
 
     def __cinit__(
         DeviceUniqueByKeyBuildResult self,
-        Iterator d_keys_in,
-        Iterator d_values_in,
-        Iterator d_keys_out,
-        Iterator d_values_out,
-        Iterator d_num_selected_out,
-        Op comparison_op,
-        CommonData common_data
+        d_keys_in=None,
+        d_values_in=None,
+        d_keys_out=None,
+        d_values_out=None,
+        d_num_selected_out=None,
+        comparison_op=None,
+        common_data=None,
     ):
-        cdef CUresult status = -1
-        cdef int cc_major = common_data.get_cc_major()
-        cdef int cc_minor = common_data.get_cc_minor()
-        cdef const char *cub_path = common_data.cub_path_get_c_str()
-        cdef const char *thrust_path = common_data.thrust_path_get_c_str()
-        cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
-        cdef const char *ctk_path = common_data.ctk_path_get_c_str()
-
         memset(&self.build_data, 0, sizeof(cccl_device_unique_by_key_build_result_t))
+        if d_keys_in is None:
+            return  # deserialization path: fields populated by _deserialize()
+
+        cdef CUresult status = -1
+        cdef int cc_major = (<CommonData>common_data).get_cc_major()
+        cdef int cc_minor = (<CommonData>common_data).get_cc_minor()
+        cdef const char *cub_path = (<CommonData>common_data).cub_path_get_c_str()
+        cdef const char *thrust_path = (<CommonData>common_data).thrust_path_get_c_str()
+        cdef const char *libcudacxx_path = (<CommonData>common_data).libcudacxx_path_get_c_str()
+        cdef const char *ctk_path = (<CommonData>common_data).ctk_path_get_c_str()
+
         with nogil:
             status = cccl_device_unique_by_key_build(
                 &self.build_data,
-                d_keys_in.iter_data,
-                d_values_in.iter_data,
-                d_keys_out.iter_data,
-                d_values_out.iter_data,
-                d_num_selected_out.iter_data,
-                comparison_op.op_data,
+                (<Iterator>d_keys_in).iter_data,
+                (<Iterator>d_values_in).iter_data,
+                (<Iterator>d_keys_out).iter_data,
+                (<Iterator>d_values_out).iter_data,
+                (<Iterator>d_num_selected_out).iter_data,
+                (<Op>comparison_op).op_data,
                 cc_major,
                 cc_minor,
                 cub_path,
@@ -2033,6 +2158,71 @@ cdef class DeviceUniqueByKeyBuildResult:
             <const char*>self.build_data.cubin,
             self.build_data.cubin_size
         )
+
+    def _serialize(self):
+        policy_bytes = PyBytes_FromStringAndSize(
+            <const char*>self.build_data.runtime_policy,
+            self.build_data.runtime_policy_size
+        )
+        return {
+            "cubin": PyBytes_FromStringAndSize(<const char*>self.build_data.cubin, self.build_data.cubin_size),
+            "cc": self.build_data.cc,
+            "description_bytes_per_tile": self.build_data.description_bytes_per_tile,
+            "payload_bytes_per_tile": self.build_data.payload_bytes_per_tile,
+            "policy_bytes": base64.b64encode(policy_bytes).decode("ascii"),
+            "compact_init_lowered": (<bytes>self.build_data.compact_init_kernel_lowered_name).decode(),
+            "sweep_lowered": (<bytes>self.build_data.sweep_kernel_lowered_name).decode(),
+        }
+
+    @staticmethod
+    def _deserialize(data):
+        cdef DeviceUniqueByKeyBuildResult obj = DeviceUniqueByKeyBuildResult.__new__(DeviceUniqueByKeyBuildResult)
+
+        cubin_bytes = data["cubin"]
+        cdef size_t cubin_size = len(cubin_bytes)
+        cdef const void* cubin_ptr = <const void*><const char*>cubin_bytes
+
+        ci_bytes   = data["compact_init_lowered"].encode()
+        sw_bytes   = data["sweep_lowered"].encode()
+
+        cdef const char* knames[2]
+        knames[0] = <const char*>ci_bytes
+        knames[1] = <const char*>sw_bytes
+
+        cdef CUkernel khandles[2]
+        khandles[0] = NULL
+        khandles[1] = NULL
+
+        cdef void* cubin_copy = NULL
+        cdef CUlibrary library = NULL
+        cdef CUresult status = cccl_load_cubin_and_get_kernels(
+            cubin_ptr, cubin_size, &cubin_copy, &library, knames, khandles, 2
+        )
+        if status != 0:
+            raise RuntimeError(f"Failed loading cubin in _deserialize, error: {status}")
+
+        obj.build_data.cubin      = cubin_copy
+        obj.build_data.cubin_size = cubin_size
+        obj.build_data.library    = library
+        obj.build_data.cc         = data["cc"]
+        obj.build_data.compact_init_kernel = khandles[0]
+        obj.build_data.sweep_kernel        = khandles[1]
+        obj.build_data.description_bytes_per_tile = data["description_bytes_per_tile"]
+        obj.build_data.payload_bytes_per_tile     = data["payload_bytes_per_tile"]
+
+        policy_bytes = base64.b64decode(data["policy_bytes"])
+        cdef size_t policy_size = len(policy_bytes)
+        cdef void* policy_copy = malloc(policy_size)
+        if policy_copy == NULL:
+            raise MemoryError("Failed to allocate runtime_policy")
+        memcpy(policy_copy, <const void*><const char*>policy_bytes, policy_size)
+        obj.build_data.runtime_policy      = policy_copy
+        obj.build_data.runtime_policy_size = policy_size
+
+        obj.build_data.compact_init_kernel_lowered_name = strdup(<const char*>ci_bytes)
+        obj.build_data.sweep_kernel_lowered_name        = strdup(<const char*>sw_bytes)
+
+        return obj
 
 # -----------------
 # DeviceRadixSort
@@ -2646,8 +2836,21 @@ cdef class DeviceBinaryTransform:
 # -----------------
 cdef extern from "cccl/c/histogram.h":
     cdef struct cccl_device_histogram_build_result_t 'cccl_device_histogram_build_result_t':
-        const char* cubin
+        int cc
+        void* cubin
         size_t cubin_size
+        CUlibrary library
+        cccl_type_info counter_type
+        cccl_type_info level_type
+        cccl_type_info sample_type
+        int num_active_channels
+        bint may_overflow
+        CUkernel init_kernel
+        CUkernel sweep_kernel
+        void* runtime_policy
+        size_t runtime_policy_size
+        char* init_kernel_lowered_name
+        char* sweep_kernel_lowered_name
 
     cdef CUresult cccl_device_histogram_build(
         cccl_device_histogram_build_result_t *build_ptr,
@@ -2696,38 +2899,47 @@ cdef class DeviceHistogramBuildResult:
 
     def __cinit__(
         DeviceHistogramBuildResult self,
-        int num_channels,
-        int num_active_channels,
-        Iterator d_samples,
-        int num_levels,
-        Iterator d_histogram,
-        Value h_levels,
-        int num_rows,
-        int row_stride_samples,
-        bint is_evenly_segmented,
-        CommonData common_data
+        num_channels=None,
+        num_active_channels=None,
+        d_samples=None,
+        num_levels=None,
+        d_histogram=None,
+        h_levels=None,
+        num_rows=None,
+        row_stride_samples=None,
+        is_evenly_segmented=None,
+        common_data=None,
     ):
-        cdef CUresult status = -1
-        cdef int cc_major = common_data.get_cc_major()
-        cdef int cc_minor = common_data.get_cc_minor()
-        cdef const char *cub_path = common_data.cub_path_get_c_str()
-        cdef const char *thrust_path = common_data.thrust_path_get_c_str()
-        cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
-        cdef const char *ctk_path = common_data.ctk_path_get_c_str()
-
         memset(&self.build_data, 0, sizeof(cccl_device_histogram_build_result_t))
+        if d_samples is None:
+            return  # deserialization path: fields populated by _deserialize()
+
+        cdef CUresult status = -1
+        cdef int c_num_channels = num_channels
+        cdef int c_num_active_channels = num_active_channels
+        cdef int c_num_levels = num_levels
+        cdef int64_t c_num_rows = num_rows
+        cdef int64_t c_row_stride_samples = row_stride_samples
+        cdef bint c_is_evenly_segmented = is_evenly_segmented
+        cdef int cc_major = (<CommonData>common_data).get_cc_major()
+        cdef int cc_minor = (<CommonData>common_data).get_cc_minor()
+        cdef const char *cub_path = (<CommonData>common_data).cub_path_get_c_str()
+        cdef const char *thrust_path = (<CommonData>common_data).thrust_path_get_c_str()
+        cdef const char *libcudacxx_path = (<CommonData>common_data).libcudacxx_path_get_c_str()
+        cdef const char *ctk_path = (<CommonData>common_data).ctk_path_get_c_str()
+
         with nogil:
             status = cccl_device_histogram_build(
                 &self.build_data,
-                num_channels,
-                num_active_channels,
-                d_samples.iter_data,
-                num_levels,
-                d_histogram.iter_data,
-                h_levels.value_data,
-                num_rows,
-                row_stride_samples,
-                is_evenly_segmented,
+                c_num_channels,
+                c_num_active_channels,
+                (<Iterator>d_samples).iter_data,
+                c_num_levels,
+                (<Iterator>d_histogram).iter_data,
+                (<Value>h_levels).value_data,
+                c_num_rows,
+                c_row_stride_samples,
+                c_is_evenly_segmented,
                 cc_major,
                 cc_minor,
                 cub_path,
@@ -2786,6 +2998,94 @@ cdef class DeviceHistogramBuildResult:
             <const char*>self.build_data.cubin,
             self.build_data.cubin_size
         )
+
+    def _serialize(self):
+        policy_bytes = PyBytes_FromStringAndSize(
+            <const char*>self.build_data.runtime_policy,
+            self.build_data.runtime_policy_size
+        )
+        return {
+            "cubin": PyBytes_FromStringAndSize(<const char*>self.build_data.cubin, self.build_data.cubin_size),
+            "cc": self.build_data.cc,
+            "counter_type": {"type": <int>self.build_data.counter_type.type,
+                             "size": self.build_data.counter_type.size,
+                             "alignment": self.build_data.counter_type.alignment},
+            "level_type": {"type": <int>self.build_data.level_type.type,
+                           "size": self.build_data.level_type.size,
+                           "alignment": self.build_data.level_type.alignment},
+            "sample_type": {"type": <int>self.build_data.sample_type.type,
+                            "size": self.build_data.sample_type.size,
+                            "alignment": self.build_data.sample_type.alignment},
+            "num_active_channels": self.build_data.num_active_channels,
+            "may_overflow": bool(self.build_data.may_overflow),
+            "policy_bytes": base64.b64encode(policy_bytes).decode("ascii"),
+            "init_lowered": (<bytes>self.build_data.init_kernel_lowered_name).decode(),
+            "sweep_lowered": (<bytes>self.build_data.sweep_kernel_lowered_name).decode(),
+        }
+
+    @staticmethod
+    def _deserialize(data):
+        cdef DeviceHistogramBuildResult obj = DeviceHistogramBuildResult.__new__(DeviceHistogramBuildResult)
+
+        cubin_bytes = data["cubin"]
+        cdef size_t cubin_size = len(cubin_bytes)
+        cdef const void* cubin_ptr = <const void*><const char*>cubin_bytes
+
+        init_bytes  = data["init_lowered"].encode()
+        sweep_bytes = data["sweep_lowered"].encode()
+
+        cdef const char* knames[2]
+        knames[0] = <const char*>init_bytes
+        knames[1] = <const char*>sweep_bytes
+
+        cdef CUkernel khandles[2]
+        khandles[0] = NULL
+        khandles[1] = NULL
+
+        cdef void* cubin_copy = NULL
+        cdef CUlibrary library = NULL
+        cdef CUresult status = cccl_load_cubin_and_get_kernels(
+            cubin_ptr, cubin_size, &cubin_copy, &library, knames, khandles, 2
+        )
+        if status != 0:
+            raise RuntimeError(f"Failed loading cubin in _deserialize, error: {status}")
+
+        obj.build_data.cubin      = cubin_copy
+        obj.build_data.cubin_size = cubin_size
+        obj.build_data.library    = library
+        obj.build_data.cc         = data["cc"]
+        obj.build_data.init_kernel  = khandles[0]
+        obj.build_data.sweep_kernel = khandles[1]
+
+        ct = data["counter_type"]
+        obj.build_data.counter_type.type      = <cccl_type_enum>ct["type"]
+        obj.build_data.counter_type.size      = ct["size"]
+        obj.build_data.counter_type.alignment = ct["alignment"]
+        lt = data["level_type"]
+        obj.build_data.level_type.type      = <cccl_type_enum>lt["type"]
+        obj.build_data.level_type.size      = lt["size"]
+        obj.build_data.level_type.alignment = lt["alignment"]
+        st = data["sample_type"]
+        obj.build_data.sample_type.type      = <cccl_type_enum>st["type"]
+        obj.build_data.sample_type.size      = st["size"]
+        obj.build_data.sample_type.alignment = st["alignment"]
+
+        obj.build_data.num_active_channels = data["num_active_channels"]
+        obj.build_data.may_overflow        = <bint>data["may_overflow"]
+
+        policy_bytes = base64.b64decode(data["policy_bytes"])
+        cdef size_t policy_size = len(policy_bytes)
+        cdef void* policy_copy = malloc(policy_size)
+        if policy_copy == NULL:
+            raise MemoryError("Failed to allocate runtime_policy")
+        memcpy(policy_copy, <const void*><const char*>policy_bytes, policy_size)
+        obj.build_data.runtime_policy      = policy_copy
+        obj.build_data.runtime_policy_size = policy_size
+
+        obj.build_data.init_kernel_lowered_name  = strdup(<const char*>init_bytes)
+        obj.build_data.sweep_kernel_lowered_name = strdup(<const char*>sweep_bytes)
+
+        return obj
 
 
 # -------------------
@@ -2959,8 +3259,16 @@ cdef class DeviceBinarySearchBuildResult:
 # ----------------------------------
 cdef extern from "cccl/c/three_way_partition.h":
     cdef struct cccl_device_three_way_partition_build_result_t 'cccl_device_three_way_partition_build_result_t':
-        const char* cubin
+        int cc
+        void* cubin
         size_t cubin_size
+        CUlibrary library
+        CUkernel three_way_partition_init_kernel
+        CUkernel three_way_partition_kernel
+        void* runtime_policy
+        size_t runtime_policy_size
+        char* three_way_partition_init_kernel_lowered_name
+        char* three_way_partition_kernel_lowered_name
 
     cdef CUresult cccl_device_three_way_partition_build(
         cccl_device_three_way_partition_build_result_t *build_ptr,
@@ -3007,34 +3315,37 @@ cdef class DeviceThreeWayPartitionBuildResult:
 
     def __cinit__(
         DeviceThreeWayPartitionBuildResult self,
-        Iterator d_in,
-        Iterator d_first_part_out,
-        Iterator d_second_part_out,
-        Iterator d_unselected_out,
-        Iterator d_num_selected_out,
-        Op select_first_part_op,
-        Op select_second_part_op,
-        CommonData common_data
+        d_in=None,
+        d_first_part_out=None,
+        d_second_part_out=None,
+        d_unselected_out=None,
+        d_num_selected_out=None,
+        select_first_part_op=None,
+        select_second_part_op=None,
+        common_data=None,
     ):
-        cdef CUresult status = -1
-        cdef int cc_major = common_data.get_cc_major()
-        cdef int cc_minor = common_data.get_cc_minor()
-        cdef const char *cub_path = common_data.cub_path_get_c_str()
-        cdef const char *thrust_path = common_data.thrust_path_get_c_str()
-        cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
-        cdef const char *ctk_path = common_data.ctk_path_get_c_str()
-
         memset(&self.build_data, 0, sizeof(cccl_device_three_way_partition_build_result_t))
+        if d_in is None:
+            return  # deserialization path: fields populated by _deserialize()
+
+        cdef CUresult status = -1
+        cdef int cc_major = (<CommonData>common_data).get_cc_major()
+        cdef int cc_minor = (<CommonData>common_data).get_cc_minor()
+        cdef const char *cub_path = (<CommonData>common_data).cub_path_get_c_str()
+        cdef const char *thrust_path = (<CommonData>common_data).thrust_path_get_c_str()
+        cdef const char *libcudacxx_path = (<CommonData>common_data).libcudacxx_path_get_c_str()
+        cdef const char *ctk_path = (<CommonData>common_data).ctk_path_get_c_str()
+
         with nogil:
             status = cccl_device_three_way_partition_build(
                 &self.build_data,
-                d_in.iter_data,
-                d_first_part_out.iter_data,
-                d_second_part_out.iter_data,
-                d_unselected_out.iter_data,
-                d_num_selected_out.iter_data,
-                select_first_part_op.op_data,
-                select_second_part_op.op_data,
+                (<Iterator>d_in).iter_data,
+                (<Iterator>d_first_part_out).iter_data,
+                (<Iterator>d_second_part_out).iter_data,
+                (<Iterator>d_unselected_out).iter_data,
+                (<Iterator>d_num_selected_out).iter_data,
+                (<Op>select_first_part_op).op_data,
+                (<Op>select_second_part_op).op_data,
                 cc_major,
                 cc_minor,
                 cub_path,
@@ -3093,6 +3404,67 @@ cdef class DeviceThreeWayPartitionBuildResult:
             self.build_data.cubin_size
         )
 
+    def _serialize(self):
+        policy_bytes = PyBytes_FromStringAndSize(
+            <const char*>self.build_data.runtime_policy,
+            self.build_data.runtime_policy_size
+        )
+        return {
+            "cubin": PyBytes_FromStringAndSize(<const char*>self.build_data.cubin, self.build_data.cubin_size),
+            "cc": self.build_data.cc,
+            "policy_bytes": base64.b64encode(policy_bytes).decode("ascii"),
+            "init_lowered": (<bytes>self.build_data.three_way_partition_init_kernel_lowered_name).decode(),
+            "kernel_lowered": (<bytes>self.build_data.three_way_partition_kernel_lowered_name).decode(),
+        }
+
+    @staticmethod
+    def _deserialize(data):
+        cdef DeviceThreeWayPartitionBuildResult obj = DeviceThreeWayPartitionBuildResult.__new__(DeviceThreeWayPartitionBuildResult)
+
+        cubin_bytes = data["cubin"]
+        cdef size_t cubin_size = len(cubin_bytes)
+        cdef const void* cubin_ptr = <const void*><const char*>cubin_bytes
+
+        init_bytes   = data["init_lowered"].encode()
+        kernel_bytes = data["kernel_lowered"].encode()
+
+        cdef const char* knames[2]
+        knames[0] = <const char*>init_bytes
+        knames[1] = <const char*>kernel_bytes
+
+        cdef CUkernel khandles[2]
+        khandles[0] = NULL
+        khandles[1] = NULL
+
+        cdef void* cubin_copy = NULL
+        cdef CUlibrary library = NULL
+        cdef CUresult status = cccl_load_cubin_and_get_kernels(
+            cubin_ptr, cubin_size, &cubin_copy, &library, knames, khandles, 2
+        )
+        if status != 0:
+            raise RuntimeError(f"Failed loading cubin in _deserialize, error: {status}")
+
+        obj.build_data.cubin      = cubin_copy
+        obj.build_data.cubin_size = cubin_size
+        obj.build_data.library    = library
+        obj.build_data.cc         = data["cc"]
+        obj.build_data.three_way_partition_init_kernel = khandles[0]
+        obj.build_data.three_way_partition_kernel      = khandles[1]
+
+        policy_bytes = base64.b64decode(data["policy_bytes"])
+        cdef size_t policy_size = len(policy_bytes)
+        cdef void* policy_copy = malloc(policy_size)
+        if policy_copy == NULL:
+            raise MemoryError("Failed to allocate runtime_policy")
+        memcpy(policy_copy, <const void*><const char*>policy_bytes, policy_size)
+        obj.build_data.runtime_policy      = policy_copy
+        obj.build_data.runtime_policy_size = policy_size
+
+        obj.build_data.three_way_partition_init_kernel_lowered_name = strdup(<const char*>init_bytes)
+        obj.build_data.three_way_partition_kernel_lowered_name      = strdup(<const char*>kernel_bytes)
+
+        return obj
+
 
 # -------------------
 # DeviceSegmentedSort
@@ -3100,8 +3472,29 @@ cdef class DeviceThreeWayPartitionBuildResult:
 
 cdef extern from "cccl/c/segmented_sort.h":
     cdef struct cccl_device_segmented_sort_build_result_t 'cccl_device_segmented_sort_build_result_t':
-        const char* cubin
+        int cc
+        void* cubin
         size_t cubin_size
+        CUlibrary library
+        cccl_type_info key_type
+        cccl_type_info offset_type
+        cccl_op_t large_segments_selector_op
+        cccl_op_t small_segments_selector_op
+        CUkernel segmented_sort_fallback_kernel
+        CUkernel segmented_sort_kernel_small
+        CUkernel segmented_sort_kernel_large
+        CUkernel three_way_partition_init_kernel
+        CUkernel three_way_partition_kernel
+        void* runtime_policy
+        size_t runtime_policy_size
+        void* partition_runtime_policy
+        size_t partition_runtime_policy_size
+        cccl_sort_order_t order
+        char* segmented_sort_fallback_kernel_lowered_name
+        char* segmented_sort_kernel_small_lowered_name
+        char* segmented_sort_kernel_large_lowered_name
+        char* three_way_partition_init_kernel_lowered_name
+        char* three_way_partition_kernel_lowered_name
 
     cdef CUresult cccl_device_segmented_sort_build(
         cccl_device_segmented_sort_build_result_t *build_ptr,
@@ -3146,30 +3539,34 @@ cdef class DeviceSegmentedSortBuildResult:
 
     def __cinit__(
         DeviceSegmentedSortBuildResult self,
-        cccl_sort_order_t order,
-        Iterator d_keys_in,
-        Iterator d_values_in,
-        Iterator begin_offset_in,
-        Iterator end_offset_in,
-        CommonData common_data,
+        order=None,
+        d_keys_in=None,
+        d_values_in=None,
+        begin_offset_in=None,
+        end_offset_in=None,
+        common_data=None,
     ):
-        cdef CUresult status = -1
-        cdef int cc_major = common_data.get_cc_major()
-        cdef int cc_minor = common_data.get_cc_minor()
-        cdef const char *cub_path = common_data.cub_path_get_c_str()
-        cdef const char *thrust_path = common_data.thrust_path_get_c_str()
-        cdef const char *libcudacxx_path = common_data.libcudacxx_path_get_c_str()
-        cdef const char *ctk_path = common_data.ctk_path_get_c_str()
-
         memset(&self.build_data, 0, sizeof(cccl_device_segmented_sort_build_result_t))
+        if order is None:
+            return  # deserialization path: fields populated by _deserialize()
+
+        cdef CUresult status = -1
+        cdef cccl_sort_order_t c_order = <cccl_sort_order_t>order
+        cdef int cc_major = (<CommonData>common_data).get_cc_major()
+        cdef int cc_minor = (<CommonData>common_data).get_cc_minor()
+        cdef const char *cub_path = (<CommonData>common_data).cub_path_get_c_str()
+        cdef const char *thrust_path = (<CommonData>common_data).thrust_path_get_c_str()
+        cdef const char *libcudacxx_path = (<CommonData>common_data).libcudacxx_path_get_c_str()
+        cdef const char *ctk_path = (<CommonData>common_data).ctk_path_get_c_str()
+
         with nogil:
             status = cccl_device_segmented_sort_build(
                 &self.build_data,
-                order,
-                d_keys_in.iter_data,
-                d_values_in.iter_data,
-                begin_offset_in.iter_data,
-                end_offset_in.iter_data,
+                c_order,
+                (<Iterator>d_keys_in).iter_data,
+                (<Iterator>d_values_in).iter_data,
+                (<Iterator>begin_offset_in).iter_data,
+                (<Iterator>end_offset_in).iter_data,
                 cc_major,
                 cc_minor,
                 cub_path,
@@ -3234,3 +3631,159 @@ cdef class DeviceSegmentedSortBuildResult:
             <const char*>self.build_data.cubin,
             self.build_data.cubin_size
         )
+
+    def _serialize(self):
+        cdef cccl_op_t lop = self.build_data.large_segments_selector_op
+        cdef cccl_op_t sop = self.build_data.small_segments_selector_op
+        policy_bytes = PyBytes_FromStringAndSize(
+            <const char*>self.build_data.runtime_policy,
+            self.build_data.runtime_policy_size
+        )
+        partition_policy_bytes = PyBytes_FromStringAndSize(
+            <const char*>self.build_data.partition_runtime_policy,
+            self.build_data.partition_runtime_policy_size
+        )
+        return {
+            "cubin": PyBytes_FromStringAndSize(<const char*>self.build_data.cubin, self.build_data.cubin_size),
+            "cc": self.build_data.cc,
+            "key_type": {"type": <int>self.build_data.key_type.type, "size": self.build_data.key_type.size,
+                         "alignment": self.build_data.key_type.alignment},
+            "offset_type": {"type": <int>self.build_data.offset_type.type, "size": self.build_data.offset_type.size,
+                            "alignment": self.build_data.offset_type.alignment},
+            "order": <int>self.build_data.order,
+            "policy_bytes": base64.b64encode(policy_bytes).decode("ascii"),
+            "partition_policy_bytes": base64.b64encode(partition_policy_bytes).decode("ascii"),
+            "fallback_lowered": (<bytes>self.build_data.segmented_sort_fallback_kernel_lowered_name).decode(),
+            "small_lowered":    (<bytes>self.build_data.segmented_sort_kernel_small_lowered_name).decode(),
+            "large_lowered":    (<bytes>self.build_data.segmented_sort_kernel_large_lowered_name).decode(),
+            "twp_init_lowered": (<bytes>self.build_data.three_way_partition_init_kernel_lowered_name).decode(),
+            "twp_lowered":      (<bytes>self.build_data.three_way_partition_kernel_lowered_name).decode(),
+            # Selector ops: code (LTOIR) + state bytes
+            "large_sel_code":      base64.b64encode(PyBytes_FromStringAndSize(lop.code, lop.code_size)).decode("ascii"),
+            "large_sel_state":     base64.b64encode(PyBytes_FromStringAndSize(<const char*>lop.state, lop.size)).decode("ascii"),
+            "large_sel_size":      lop.size,
+            "large_sel_alignment": lop.alignment,
+            "small_sel_code":      base64.b64encode(PyBytes_FromStringAndSize(sop.code, sop.code_size)).decode("ascii"),
+            "small_sel_state":     base64.b64encode(PyBytes_FromStringAndSize(<const char*>sop.state, sop.size)).decode("ascii"),
+            "small_sel_size":      sop.size,
+            "small_sel_alignment": sop.alignment,
+        }
+
+    @staticmethod
+    def _deserialize(data):
+        cdef DeviceSegmentedSortBuildResult obj = DeviceSegmentedSortBuildResult.__new__(DeviceSegmentedSortBuildResult)
+
+        cubin_bytes = data["cubin"]
+        cdef size_t cubin_size = len(cubin_bytes)
+        cdef const void* cubin_ptr = <const void*><const char*>cubin_bytes
+
+        fb_bytes = data["fallback_lowered"].encode()
+        sm_bytes = data["small_lowered"].encode()
+        lg_bytes = data["large_lowered"].encode()
+        ti_bytes = data["twp_init_lowered"].encode()
+        tw_bytes = data["twp_lowered"].encode()
+
+        cdef const char* knames[5]
+        knames[0] = <const char*>fb_bytes
+        knames[1] = <const char*>sm_bytes
+        knames[2] = <const char*>lg_bytes
+        knames[3] = <const char*>ti_bytes
+        knames[4] = <const char*>tw_bytes
+
+        cdef CUkernel khandles[5]
+        for i in range(5):
+            khandles[i] = NULL
+
+        cdef void* cubin_copy = NULL
+        cdef CUlibrary library = NULL
+        cdef CUresult status = cccl_load_cubin_and_get_kernels(
+            cubin_ptr, cubin_size, &cubin_copy, &library, knames, khandles, 5
+        )
+        if status != 0:
+            raise RuntimeError(f"Failed loading cubin in _deserialize, error: {status}")
+
+        obj.build_data.cubin      = cubin_copy
+        obj.build_data.cubin_size = cubin_size
+        obj.build_data.library    = library
+        obj.build_data.cc         = data["cc"]
+        obj.build_data.segmented_sort_fallback_kernel  = khandles[0]
+        obj.build_data.segmented_sort_kernel_small     = khandles[1]
+        obj.build_data.segmented_sort_kernel_large     = khandles[2]
+        obj.build_data.three_way_partition_init_kernel = khandles[3]
+        obj.build_data.three_way_partition_kernel      = khandles[4]
+
+        kt = data["key_type"]
+        obj.build_data.key_type.type      = <cccl_type_enum>kt["type"]
+        obj.build_data.key_type.size      = kt["size"]
+        obj.build_data.key_type.alignment = kt["alignment"]
+        ot = data["offset_type"]
+        obj.build_data.offset_type.type      = <cccl_type_enum>ot["type"]
+        obj.build_data.offset_type.size      = ot["size"]
+        obj.build_data.offset_type.alignment = ot["alignment"]
+        obj.build_data.order = <cccl_sort_order_t>data["order"]
+
+        policy_bytes = base64.b64decode(data["policy_bytes"])
+        cdef size_t policy_size = len(policy_bytes)
+        cdef void* policy_copy = malloc(policy_size)
+        if policy_copy == NULL:
+            raise MemoryError("Failed to allocate runtime_policy")
+        memcpy(policy_copy, <const void*><const char*>policy_bytes, policy_size)
+        obj.build_data.runtime_policy      = policy_copy
+        obj.build_data.runtime_policy_size = policy_size
+
+        partition_policy_bytes = base64.b64decode(data["partition_policy_bytes"])
+        cdef size_t partition_policy_size = len(partition_policy_bytes)
+        cdef void* partition_policy_copy = malloc(partition_policy_size)
+        if partition_policy_copy == NULL:
+            raise MemoryError("Failed to allocate partition_runtime_policy")
+        memcpy(partition_policy_copy, <const void*><const char*>partition_policy_bytes, partition_policy_size)
+        obj.build_data.partition_runtime_policy      = partition_policy_copy
+        obj.build_data.partition_runtime_policy_size = partition_policy_size
+
+        obj.build_data.segmented_sort_fallback_kernel_lowered_name  = strdup(<const char*>fb_bytes)
+        obj.build_data.segmented_sort_kernel_small_lowered_name     = strdup(<const char*>sm_bytes)
+        obj.build_data.segmented_sort_kernel_large_lowered_name     = strdup(<const char*>lg_bytes)
+        obj.build_data.three_way_partition_init_kernel_lowered_name = strdup(<const char*>ti_bytes)
+        obj.build_data.three_way_partition_kernel_lowered_name      = strdup(<const char*>tw_bytes)
+
+        # Reconstruct large selector op
+        large_code_bytes  = base64.b64decode(data["large_sel_code"])
+        large_state_bytes = base64.b64decode(data["large_sel_state"])
+        cdef size_t large_code_size  = len(large_code_bytes)
+        cdef size_t large_state_size = data["large_sel_size"]
+        cdef char*  large_code_buf   = <char*>malloc(large_code_size)
+        cdef void*  large_state_buf  = malloc(large_state_size)
+        if large_code_buf == NULL or large_state_buf == NULL:
+            raise MemoryError("Failed to allocate large selector op buffers")
+        memcpy(large_code_buf,  <const void*><const char*>large_code_bytes,  large_code_size)
+        memcpy(large_state_buf, <const void*><const char*>large_state_bytes, large_state_size)
+        obj.build_data.large_segments_selector_op.type       = cccl_op_kind_t.STATEFUL
+        obj.build_data.large_segments_selector_op.name       = b"cccl_large_segments_selector_op"
+        obj.build_data.large_segments_selector_op.code       = large_code_buf
+        obj.build_data.large_segments_selector_op.code_size  = large_code_size
+        obj.build_data.large_segments_selector_op.code_type  = cccl_op_code_type.CCCL_OP_LTOIR
+        obj.build_data.large_segments_selector_op.size       = large_state_size
+        obj.build_data.large_segments_selector_op.alignment  = data["large_sel_alignment"]
+        obj.build_data.large_segments_selector_op.state      = large_state_buf
+
+        # Reconstruct small selector op
+        small_code_bytes  = base64.b64decode(data["small_sel_code"])
+        small_state_bytes = base64.b64decode(data["small_sel_state"])
+        cdef size_t small_code_size  = len(small_code_bytes)
+        cdef size_t small_state_size = data["small_sel_size"]
+        cdef char*  small_code_buf   = <char*>malloc(small_code_size)
+        cdef void*  small_state_buf  = malloc(small_state_size)
+        if small_code_buf == NULL or small_state_buf == NULL:
+            raise MemoryError("Failed to allocate small selector op buffers")
+        memcpy(small_code_buf,  <const void*><const char*>small_code_bytes,  small_code_size)
+        memcpy(small_state_buf, <const void*><const char*>small_state_bytes, small_state_size)
+        obj.build_data.small_segments_selector_op.type       = cccl_op_kind_t.STATEFUL
+        obj.build_data.small_segments_selector_op.name       = b"cccl_small_segments_selector_op"
+        obj.build_data.small_segments_selector_op.code       = small_code_buf
+        obj.build_data.small_segments_selector_op.code_size  = small_code_size
+        obj.build_data.small_segments_selector_op.code_type  = cccl_op_code_type.CCCL_OP_LTOIR
+        obj.build_data.small_segments_selector_op.size       = small_state_size
+        obj.build_data.small_segments_selector_op.alignment  = data["small_sel_alignment"]
+        obj.build_data.small_segments_selector_op.state      = small_state_buf
+
+        return obj

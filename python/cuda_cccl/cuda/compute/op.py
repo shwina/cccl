@@ -88,6 +88,9 @@ class _WellKnownOp(_OpAdapter):
     def __hash__(self):
         return hash(self._kind)
 
+    def __repr__(self):
+        return f"_WellKnownOp({self._kind.name})"
+
 
 class RawOp(_OpAdapter):
     """
@@ -176,6 +179,12 @@ class RawOp(_OpAdapter):
 
     def __hash__(self):
         return hash(self._identity)
+
+    def __repr__(self):
+        import hashlib
+
+        digest = hashlib.sha256(self._ltoir + self._name.encode()).hexdigest()[:16]
+        return f"RawOp({self._name},{digest})"
 
 
 # Public aliases

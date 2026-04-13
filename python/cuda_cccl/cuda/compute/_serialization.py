@@ -64,5 +64,25 @@ def load_algorithm(path: str | PathLike):
         from .algorithms._binary_search import _BinarySearch
 
         return _BinarySearch._from_serialized(data)
+    elif algorithm == "scan":
+        from .algorithms._scan import _Scan
+
+        return _Scan._from_serialized(data)
+    elif algorithm == "unique_by_key":
+        from .algorithms._unique_by_key import _UniqueByKey
+
+        return _UniqueByKey._from_serialized(data)
+    elif algorithm == "histogram":
+        from .algorithms._histogram import _Histogram
+
+        return _Histogram._from_serialized(data)
+    elif algorithm == "three_way_partition":
+        from .algorithms._three_way_partition import _ThreeWayPartition
+
+        return _ThreeWayPartition._from_serialized(data)
+    elif algorithm == "segmented_sort":
+        from .algorithms._sort._segmented_sort import _SegmentedSort
+
+        return _SegmentedSort._from_serialized(data)
     else:
         raise ValueError(f"Unknown algorithm type in file: {algorithm!r}")

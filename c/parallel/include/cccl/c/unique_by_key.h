@@ -33,6 +33,10 @@ typedef struct cccl_device_unique_by_key_build_result_t
   size_t description_bytes_per_tile;
   size_t payload_bytes_per_tile;
   void* runtime_policy;
+  size_t runtime_policy_size;
+  // Lowered (mangled) kernel names, heap-allocated, freed by cccl_device_unique_by_key_cleanup():
+  char* compact_init_kernel_lowered_name;
+  char* sweep_kernel_lowered_name;
 } cccl_device_unique_by_key_build_result_t;
 
 CCCL_C_API CUresult cccl_device_unique_by_key_build(

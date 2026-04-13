@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from os import PathLike
 from typing import Union
 
 import numpy as np
@@ -75,6 +76,14 @@ class _Histogram:
         num_samples: int,
         stream=None,
     ):
+        if self.d_samples_cccl is None:
+            # Lazy init for deserialized objects
+            self.d_samples_cccl = cccl.to_cccl_input_iter(d_samples)
+            self.d_histogram_cccl = cccl.to_cccl_output_iter(d_histogram)
+            self.h_num_output_levels_cccl = cccl.to_cccl_value(h_num_output_levels)
+            self.h_lower_level_cccl = cccl.to_cccl_value(h_lower_level)
+            self.h_upper_level_cccl = cccl.to_cccl_value(h_upper_level)
+
         set_cccl_iterator_state(self.d_samples_cccl, d_samples)
         set_cccl_iterator_state(self.d_histogram_cccl, d_histogram)
         self.h_num_output_levels_cccl.state = to_cccl_value_state(h_num_output_levels)
@@ -106,6 +115,29 @@ class _Histogram:
         )
 
         return temp_storage_bytes
+
+    def save(self, path: str | PathLike) -> None:
+        """Serialize this histogram to a file. Reload with ``cuda.compute.load_algorithm(path)``."""
+        from pathlib import Path as _Path
+
+        from .._binary_format import write_cclb
+
+        data = self.build_result._serialize()
+        cubin = data.pop("cubin")
+        write_cclb(_Path(path), "histogram", data, cubin)
+
+    @classmethod
+    def _from_serialized(cls, data: dict) -> "_Histogram":
+        """Reconstruct from a flat build dict (as produced by ``_serialize()``)."""
+        obj = cls.__new__(cls)
+        obj.build_result = _bindings.DeviceHistogramBuildResult._deserialize(data)
+        obj.num_rows = 1
+        obj.d_samples_cccl = None  # type: ignore[assignment]
+        obj.d_histogram_cccl = None  # type: ignore[assignment]
+        obj.h_num_output_levels_cccl = None  # type: ignore[assignment]
+        obj.h_lower_level_cccl = None  # type: ignore[assignment]
+        obj.h_upper_level_cccl = None  # type: ignore[assignment]
+        return obj
 
 
 @cache_with_registered_key_functions

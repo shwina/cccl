@@ -427,6 +427,7 @@ static_assert(device_scan_policy()(::cuda::arch_id{{CUB_PTX_ARCH / 10}}) == {6},
   auto [description_bytes_per_tile,
         payload_bytes_per_tile] = get_tile_state_bytes_per_tile(accum_t, accum_cpp, args.data(), args.size(), arch);
 
+  static_assert(std::is_trivially_copyable_v<cub::detail::scan::policy_selector>);
   build_ptr->cc                         = cc;
   build_ptr->cubin                      = (void*) result.data.release();
   build_ptr->cubin_size                 = result.size;
@@ -437,7 +438,11 @@ static_assert(device_scan_policy()(::cuda::arch_id{{CUB_PTX_ARCH / 10}}) == {6},
   build_ptr->init_kind                  = init_kind;
   build_ptr->description_bytes_per_tile = description_bytes_per_tile;
   build_ptr->payload_bytes_per_tile     = payload_bytes_per_tile;
-  build_ptr->runtime_policy             = new cub::detail::scan::policy_selector{policy_sel};
+  build_ptr->runtime_policy             = std::malloc(sizeof(cub::detail::scan::policy_selector));
+  build_ptr->runtime_policy_size        = sizeof(cub::detail::scan::policy_selector);
+  std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(cub::detail::scan::policy_selector));
+  build_ptr->init_kernel_lowered_name = strdup(init_kernel_lowered_name.c_str());
+  build_ptr->scan_kernel_lowered_name = strdup(scan_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
@@ -624,8 +629,9 @@ try
     return CUDA_ERROR_INVALID_VALUE;
   }
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
-  std::unique_ptr<cub::detail::scan::policy_selector> policy(
-    static_cast<cub::detail::scan::policy_selector*>(build_ptr->runtime_policy));
+  std::free(build_ptr->runtime_policy);
+  std::free(build_ptr->init_kernel_lowered_name);
+  std::free(build_ptr->scan_kernel_lowered_name);
   check(cuLibraryUnload(build_ptr->library));
 
   return CUDA_SUCCESS;

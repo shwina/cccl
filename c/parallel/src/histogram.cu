@@ -380,6 +380,7 @@ static_assert(device_histogram_policy()(::cuda::arch_id{{CUB_PTX_ARCH / 10}}) ==
   check(cuLibraryGetKernel(&build_ptr->init_kernel, build_ptr->library, init_kernel_lowered_name.c_str()));
   check(cuLibraryGetKernel(&build_ptr->sweep_kernel, build_ptr->library, sweep_kernel_lowered_name.c_str()));
 
+  static_assert(std::is_trivially_copyable_v<cub::detail::histogram::policy_selector>);
   build_ptr->cc                  = cc;
   build_ptr->cubin               = (void*) result.data.release();
   build_ptr->cubin_size          = result.size;
@@ -389,7 +390,11 @@ static_assert(device_histogram_policy()(::cuda::arch_id{{CUB_PTX_ARCH / 10}}) ==
   build_ptr->num_active_channels = num_active_channels;
   build_ptr->may_overflow = false; // This is set in cccl_device_histogram_even_impl so that kernel source can access
                                    // it later.
-  build_ptr->runtime_policy = new cub::detail::histogram::policy_selector{policy_sel};
+  build_ptr->runtime_policy      = std::malloc(sizeof(cub::detail::histogram::policy_selector));
+  build_ptr->runtime_policy_size = sizeof(cub::detail::histogram::policy_selector);
+  std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(cub::detail::histogram::policy_selector));
+  build_ptr->init_kernel_lowered_name  = strdup(init_kernel_lowered_name.c_str());
+  build_ptr->sweep_kernel_lowered_name = strdup(sweep_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
@@ -571,8 +576,9 @@ try
   }
 
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
-  std::unique_ptr<cub::detail::histogram::policy_selector> policy(
-    static_cast<cub::detail::histogram::policy_selector*>(build_ptr->runtime_policy));
+  std::free(build_ptr->runtime_policy);
+  std::free(build_ptr->init_kernel_lowered_name);
+  std::free(build_ptr->sweep_kernel_lowered_name);
   check(cuLibraryUnload(build_ptr->library));
 
   return CUDA_SUCCESS;

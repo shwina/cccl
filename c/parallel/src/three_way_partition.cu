@@ -280,10 +280,16 @@ static_assert(
   check(cuLibraryGetKernel(
     &build_ptr->three_way_partition_kernel, build_ptr->library, three_way_partition_kernel_lowered_name.c_str()));
 
-  build_ptr->cc             = cc;
-  build_ptr->cubin          = (void*) result.data.release();
-  build_ptr->cubin_size     = result.size;
-  build_ptr->runtime_policy = new cub::detail::three_way_partition::policy_selector{policy_sel};
+  static_assert(std::is_trivially_copyable_v<cub::detail::three_way_partition::policy_selector>);
+  build_ptr->cc                  = cc;
+  build_ptr->cubin               = (void*) result.data.release();
+  build_ptr->cubin_size          = result.size;
+  build_ptr->runtime_policy      = std::malloc(sizeof(cub::detail::three_way_partition::policy_selector));
+  build_ptr->runtime_policy_size = sizeof(cub::detail::three_way_partition::policy_selector);
+  std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(cub::detail::three_way_partition::policy_selector));
+  build_ptr->three_way_partition_init_kernel_lowered_name =
+    strdup(three_way_partition_init_kernel_lowered_name.c_str());
+  build_ptr->three_way_partition_kernel_lowered_name = strdup(three_way_partition_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
@@ -373,8 +379,9 @@ try
     return CUDA_ERROR_INVALID_VALUE;
   }
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(bld_ptr->cubin));
-  std::unique_ptr<cub::detail::three_way_partition::policy_selector> policy(
-    static_cast<cub::detail::three_way_partition::policy_selector*>(bld_ptr->runtime_policy));
+  std::free(bld_ptr->runtime_policy);
+  std::free(bld_ptr->three_way_partition_init_kernel_lowered_name);
+  std::free(bld_ptr->three_way_partition_kernel_lowered_name);
   check(cuLibraryUnload(bld_ptr->library));
 
   return CUDA_SUCCESS;

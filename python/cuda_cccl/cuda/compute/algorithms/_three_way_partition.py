@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from os import PathLike
 from typing import Callable
 
 from .. import _bindings, types
@@ -78,6 +79,23 @@ class _ThreeWayPartition:
         num_items: int,
         stream=None,
     ):
+        if self.d_in_cccl is None:
+            # Lazy init for deserialized objects
+            self.d_in_cccl = cccl.to_cccl_input_iter(d_in)
+            self.d_first_part_out_cccl = cccl.to_cccl_output_iter(d_first_part_out)
+            self.d_second_part_out_cccl = cccl.to_cccl_output_iter(d_second_part_out)
+            self.d_unselected_out_cccl = cccl.to_cccl_output_iter(d_unselected_out)
+            self.d_num_selected_out_cccl = cccl.to_cccl_output_iter(d_num_selected_out)
+            value_type = cccl.get_value_type(d_in)
+            first_op_adapter_init = make_op_adapter(select_first_part_op)
+            second_op_adapter_init = make_op_adapter(select_second_part_op)
+            self.select_first_part_op_cccl = first_op_adapter_init.compile(
+                (value_type,), types.uint8
+            )
+            self.select_second_part_op_cccl = second_op_adapter_init.compile(
+                (value_type,), types.uint8
+            )
+
         set_cccl_iterator_state(self.d_in_cccl, d_in)
         set_cccl_iterator_state(self.d_first_part_out_cccl, d_first_part_out)
         set_cccl_iterator_state(self.d_second_part_out_cccl, d_second_part_out)
@@ -112,6 +130,32 @@ class _ThreeWayPartition:
             stream_handle,
         )
         return temp_storage_bytes
+
+    def save(self, path: str | PathLike) -> None:
+        """Serialize this partitioner to a file. Reload with ``cuda.compute.load_algorithm(path)``."""
+        from pathlib import Path as _Path
+
+        from .._binary_format import write_cclb
+
+        data = self.build_result._serialize()
+        cubin = data.pop("cubin")
+        write_cclb(_Path(path), "three_way_partition", data, cubin)
+
+    @classmethod
+    def _from_serialized(cls, data: dict) -> "_ThreeWayPartition":
+        """Reconstruct from a flat build dict (as produced by ``_serialize()``)."""
+        obj = cls.__new__(cls)
+        obj.build_result = _bindings.DeviceThreeWayPartitionBuildResult._deserialize(
+            data
+        )
+        obj.d_in_cccl = None  # type: ignore[assignment]
+        obj.d_first_part_out_cccl = None  # type: ignore[assignment]
+        obj.d_second_part_out_cccl = None  # type: ignore[assignment]
+        obj.d_unselected_out_cccl = None  # type: ignore[assignment]
+        obj.d_num_selected_out_cccl = None  # type: ignore[assignment]
+        obj.select_first_part_op_cccl = None  # type: ignore[assignment]
+        obj.select_second_part_op_cccl = None  # type: ignore[assignment]
+        return obj
 
 
 @cache_with_registered_key_functions

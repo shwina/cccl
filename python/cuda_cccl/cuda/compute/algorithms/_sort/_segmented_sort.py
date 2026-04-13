@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from os import PathLike
+
 import numpy as np
 
 from ... import _bindings
@@ -84,6 +86,15 @@ class _SegmentedSort:
             _get_arrays(d_in_keys, d_out_keys, d_in_values, d_out_values)
         )
 
+        if self.d_in_keys_cccl is None:
+            # Lazy init for deserialized objects
+            self.d_in_keys_cccl = cccl.to_cccl_input_iter(d_in_keys_array)
+            self.d_out_keys_cccl = cccl.to_cccl_output_iter(d_out_keys_array)
+            self.d_in_values_cccl = cccl.to_cccl_input_iter(d_in_values_array)
+            self.d_out_values_cccl = cccl.to_cccl_output_iter(d_out_values_array)
+            self.start_offsets_in_cccl = cccl.to_cccl_input_iter(start_offsets_in)
+            self.end_offsets_in_cccl = cccl.to_cccl_input_iter(end_offsets_in)
+
         set_cccl_iterator_state(self.d_in_keys_cccl, d_in_keys_array)
         set_cccl_iterator_state(self.d_out_keys_cccl, d_out_keys_array)
         if d_in_values_array is not None:
@@ -130,6 +141,29 @@ class _SegmentedSort:
                 d_in_values.selector = selector
 
         return temp_storage_bytes
+
+    def save(self, path: str | PathLike) -> None:
+        """Serialize this sorter to a file. Reload with ``cuda.compute.load_algorithm(path)``."""
+        from pathlib import Path as _Path
+
+        from ..._binary_format import write_cclb
+
+        data = self.build_result._serialize()
+        cubin = data.pop("cubin")
+        write_cclb(_Path(path), "segmented_sort", data, cubin)
+
+    @classmethod
+    def _from_serialized(cls, data: dict) -> "_SegmentedSort":
+        """Reconstruct from a flat build dict (as produced by ``_serialize()``)."""
+        obj = cls.__new__(cls)
+        obj.build_result = _bindings.DeviceSegmentedSortBuildResult._deserialize(data)
+        obj.d_in_keys_cccl = None  # type: ignore[assignment]
+        obj.d_out_keys_cccl = None  # type: ignore[assignment]
+        obj.d_in_values_cccl = None  # type: ignore[assignment]
+        obj.d_out_values_cccl = None  # type: ignore[assignment]
+        obj.start_offsets_in_cccl = None  # type: ignore[assignment]
+        obj.end_offsets_in_cccl = None  # type: ignore[assignment]
+        return obj
 
 
 @cache_with_registered_key_functions

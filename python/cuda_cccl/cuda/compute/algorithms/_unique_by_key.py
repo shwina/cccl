@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from os import PathLike
+
 from .. import _bindings, types
 from .. import _cccl_interop as cccl
 from .._caching import cache_with_registered_key_functions
@@ -71,6 +73,19 @@ class _UniqueByKey:
         num_items: int,
         stream=None,
     ):
+        if self.d_in_keys_cccl is None:
+            # Lazy init for deserialized objects
+            self.d_in_keys_cccl = cccl.to_cccl_input_iter(d_in_keys)
+            self.d_in_items_cccl = cccl.to_cccl_input_iter(d_in_items)
+            self.d_out_keys_cccl = cccl.to_cccl_output_iter(d_out_keys)
+            self.d_out_items_cccl = cccl.to_cccl_output_iter(d_out_items)
+            self.d_out_num_selected_cccl = cccl.to_cccl_output_iter(d_out_num_selected)
+            value_type = cccl.get_value_type(d_in_keys)
+            op_adapter_init = make_op_adapter(op)
+            self.op_cccl = op_adapter_init.compile(
+                (value_type, value_type), types.uint8
+            )
+
         set_cccl_iterator_state(self.d_in_keys_cccl, d_in_keys)
         set_cccl_iterator_state(self.d_in_items_cccl, d_in_items)
         set_cccl_iterator_state(self.d_out_keys_cccl, d_out_keys)
@@ -104,6 +119,29 @@ class _UniqueByKey:
             stream_handle,
         )
         return temp_storage_bytes
+
+    def save(self, path: str | PathLike) -> None:
+        """Serialize this uniquer to a file. Reload with ``cuda.compute.load_algorithm(path)``."""
+        from pathlib import Path as _Path
+
+        from .._binary_format import write_cclb
+
+        data = self.build_result._serialize()
+        cubin = data.pop("cubin")
+        write_cclb(_Path(path), "unique_by_key", data, cubin)
+
+    @classmethod
+    def _from_serialized(cls, data: dict) -> "_UniqueByKey":
+        """Reconstruct from a flat build dict (as produced by ``_serialize()``)."""
+        obj = cls.__new__(cls)
+        obj.build_result = _bindings.DeviceUniqueByKeyBuildResult._deserialize(data)
+        obj.d_in_keys_cccl = None  # type: ignore[assignment]
+        obj.d_in_items_cccl = None  # type: ignore[assignment]
+        obj.d_out_keys_cccl = None  # type: ignore[assignment]
+        obj.d_out_items_cccl = None  # type: ignore[assignment]
+        obj.d_out_num_selected_cccl = None  # type: ignore[assignment]
+        obj.op_cccl = None  # type: ignore[assignment]
+        return obj
 
 
 @cache_with_registered_key_functions

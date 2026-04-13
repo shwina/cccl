@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from os import PathLike
 from typing import Callable, cast
 
 import numpy as np
@@ -124,6 +125,28 @@ class _Scan:
         init_value: np.ndarray | DeviceArrayLike | GpuStruct | None,
         stream=None,
     ):
+        if self.d_in_cccl is None:
+            # Lazy init for deserialized objects
+            self.d_in_cccl = cccl.to_cccl_input_iter(d_in)
+            self.d_out_cccl = cccl.to_cccl_output_iter(d_out)
+            op_adapter_init = make_op_adapter(op)
+            match self.init_kind:
+                case _bindings.InitKind.NO_INIT:
+                    value_type = get_value_type(d_in)
+                    self.init_value_cccl = None
+                case _bindings.InitKind.FUTURE_VALUE_INIT:
+                    value_type = get_value_type(cast(DeviceArrayLike, init_value))
+                    self.init_value_cccl = cccl.to_cccl_input_iter(
+                        cast(DeviceArrayLike, init_value)
+                    )
+                case _bindings.InitKind.VALUE_INIT:
+                    init_value_typed = cast("np.ndarray | GpuStruct", init_value)
+                    value_type = get_value_type(init_value_typed)
+                    self.init_value_cccl = cccl.to_cccl_value(init_value_typed)
+                case _:
+                    value_type = get_value_type(d_in)
+            self.op_cccl = op_adapter_init.compile((value_type, value_type), value_type)
+
         set_cccl_iterator_state(self.d_in_cccl, d_in)
         set_cccl_iterator_state(self.d_out_cccl, d_out)
 
@@ -167,6 +190,44 @@ class _Scan:
             stream_handle,
         )
         return temp_storage_bytes
+
+    def save(self, path: str | PathLike) -> None:
+        """Serialize this scanner to a file. Reload with ``cuda.compute.load_algorithm(path)``."""
+        from pathlib import Path as _Path
+
+        from .._binary_format import write_cclb
+
+        data = self.build_result._serialize()
+        cubin = data.pop("cubin")
+        write_cclb(_Path(path), "scan", data, cubin)
+
+    @classmethod
+    def _from_serialized(cls, data: dict) -> "_Scan":
+        """Reconstruct from a flat build dict (as produced by ``_serialize()``)."""
+        obj = cls.__new__(cls)
+        obj.build_result = _bindings.DeviceScanBuildResult._deserialize(data)
+        obj.d_in_cccl = None  # type: ignore[assignment]
+        obj.d_out_cccl = None  # type: ignore[assignment]
+        obj.init_value_cccl = None  # type: ignore[assignment]
+        obj.op_cccl = None  # type: ignore[assignment]
+        obj.init_kind = _bindings.InitKind(data["init_kind"])
+        force_inclusive = data["force_inclusive"]
+        match (force_inclusive, obj.init_kind):
+            case (True, _bindings.InitKind.FUTURE_VALUE_INIT):
+                obj.device_scan_fn = obj.build_result.compute_inclusive_future_value
+            case (True, _bindings.InitKind.VALUE_INIT):
+                obj.device_scan_fn = obj.build_result.compute_inclusive
+            case (True, _bindings.InitKind.NO_INIT):
+                obj.device_scan_fn = obj.build_result.compute_inclusive_no_init
+            case (False, _bindings.InitKind.FUTURE_VALUE_INIT):
+                obj.device_scan_fn = obj.build_result.compute_exclusive_future_value
+            case (False, _bindings.InitKind.VALUE_INIT):
+                obj.device_scan_fn = obj.build_result.compute_exclusive
+            case _:
+                raise ValueError(
+                    f"Unsupported scan variant: force_inclusive={force_inclusive}, init_kind={obj.init_kind}"
+                )
+        return obj
 
 
 # TODO Figure out `sum` without operator and initial value

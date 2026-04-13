@@ -220,15 +220,19 @@ extern "C" __device__ void {0}(void* state_ptr, const void* arg_ptr, void* resul
       ->add_program(nvrtc_translation_unit{code.c_str(), selector_op_name})
       ->compile_program({compile_args, num_compile_args})
       ->get_program_ltoir();
-  selector_op.code      = lto_buf.release();
+  // Use malloc so cleanup can consistently use std::free regardless of build vs deserialized path
+  char* code_copy = static_cast<char*>(std::malloc(lto_size));
+  std::memcpy(code_copy, lto_buf.get(), lto_size);
+  selector_op.code      = code_copy;
   selector_op.code_size = lto_size;
   selector_op.code_type = CCCL_OP_LTOIR;
   selector_op.size      = sizeof(selector_state_t);
   selector_op.alignment = alignof(selector_state_t);
-  selector_op.state     = selector_op_state.get();
 
   selector_op_state->initialize(offset, begin_offset_iterator, end_offset_iterator);
-  selector_op_state.release();
+  auto* state_copy = static_cast<selector_state_t*>(std::malloc(sizeof(selector_state_t)));
+  std::memcpy(state_copy, selector_op_state.get(), sizeof(selector_state_t));
+  selector_op.state = state_copy;
 
   return selector_op;
 }
@@ -646,6 +650,8 @@ static_assert(
   check(cuLibraryGetKernel(
     &build_ptr->three_way_partition_kernel, build_ptr->library, three_way_partition_kernel_lowered_name.c_str()));
 
+  static_assert(std::is_trivially_copyable_v<cub::detail::segmented_sort::policy_selector>);
+  static_assert(std::is_trivially_copyable_v<cub::detail::three_way_partition::policy_selector>);
   build_ptr->cc                         = cc_major * 10 + cc_minor;
   build_ptr->large_segments_selector_op = large_selector_op;
   build_ptr->small_segments_selector_op = small_selector_op;
@@ -653,9 +659,21 @@ static_assert(
   build_ptr->cubin_size                 = result.size;
   build_ptr->key_type                   = keys_in_it.value_type;
   build_ptr->offset_type                = cccl_type_info{sizeof(OffsetT), alignof(OffsetT), cccl_type_enum::CCCL_INT64};
-  build_ptr->runtime_policy             = new cub::detail::segmented_sort::policy_selector{policy_sel};
-  build_ptr->partition_runtime_policy   = new cub::detail::three_way_partition::policy_selector{partition_policy_sel};
-  build_ptr->order                      = sort_order;
+  build_ptr->runtime_policy             = std::malloc(sizeof(cub::detail::segmented_sort::policy_selector));
+  build_ptr->runtime_policy_size        = sizeof(cub::detail::segmented_sort::policy_selector);
+  std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(cub::detail::segmented_sort::policy_selector));
+  build_ptr->partition_runtime_policy      = std::malloc(sizeof(cub::detail::three_way_partition::policy_selector));
+  build_ptr->partition_runtime_policy_size = sizeof(cub::detail::three_way_partition::policy_selector);
+  std::memcpy(build_ptr->partition_runtime_policy,
+              &partition_policy_sel,
+              sizeof(cub::detail::three_way_partition::policy_selector));
+  build_ptr->order                                       = sort_order;
+  build_ptr->segmented_sort_fallback_kernel_lowered_name = strdup(segmented_sort_fallback_kernel_lowered_name.c_str());
+  build_ptr->segmented_sort_kernel_small_lowered_name    = strdup(segmented_sort_kernel_small_lowered_name.c_str());
+  build_ptr->segmented_sort_kernel_large_lowered_name    = strdup(segmented_sort_kernel_large_lowered_name.c_str());
+  build_ptr->three_way_partition_init_kernel_lowered_name =
+    strdup(three_way_partition_init_kernel_lowered_name.c_str());
+  build_ptr->three_way_partition_kernel_lowered_name = strdup(three_way_partition_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
@@ -832,21 +850,20 @@ try
   // allocation behind cubin is owned by unique_ptr with delete[] deleter now
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
 
-  // Clean up the selector op states
-  std::unique_ptr<segmented_sort::selector_state_t> large_state(
-    static_cast<segmented_sort::selector_state_t*>(build_ptr->large_segments_selector_op.state));
-  std::unique_ptr<segmented_sort::selector_state_t> small_state(
-    static_cast<segmented_sort::selector_state_t*>(build_ptr->small_segments_selector_op.state));
-
-  // Clean up the selector op code buffers
-  std::unique_ptr<char[]> large_code(const_cast<char*>(build_ptr->large_segments_selector_op.code));
-  std::unique_ptr<char[]> small_code(const_cast<char*>(build_ptr->small_segments_selector_op.code));
+  // Clean up the selector op states and code buffers (malloc-allocated, so use std::free)
+  std::free(build_ptr->large_segments_selector_op.state);
+  std::free(build_ptr->small_segments_selector_op.state);
+  std::free(const_cast<char*>(build_ptr->large_segments_selector_op.code));
+  std::free(const_cast<char*>(build_ptr->small_segments_selector_op.code));
 
   // Clean up the runtime policies
-  std::unique_ptr<cub::detail::segmented_sort::policy_selector> rtp(
-    static_cast<cub::detail::segmented_sort::policy_selector*>(build_ptr->runtime_policy));
-  std::unique_ptr<cub::detail::three_way_partition::policy_selector> prtp(
-    static_cast<cub::detail::three_way_partition::policy_selector*>(build_ptr->partition_runtime_policy));
+  std::free(build_ptr->runtime_policy);
+  std::free(build_ptr->partition_runtime_policy);
+  std::free(build_ptr->segmented_sort_fallback_kernel_lowered_name);
+  std::free(build_ptr->segmented_sort_kernel_small_lowered_name);
+  std::free(build_ptr->segmented_sort_kernel_large_lowered_name);
+  std::free(build_ptr->three_way_partition_init_kernel_lowered_name);
+  std::free(build_ptr->three_way_partition_kernel_lowered_name);
   check(cuLibraryUnload(build_ptr->library));
 
   return CUDA_SUCCESS;
