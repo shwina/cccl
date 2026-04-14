@@ -549,9 +549,6 @@ def test_binary_transform_bool_equal_to():
     np.testing.assert_array_equal(d_output.get(), expected)
 
 
-@pytest.mark.xfail(
-    reason="Disk cache does not distinguish same-bytecode ops with different closed-over state sizes."
-)
 def test_stateful_transform_same_bytecode_different_sizes():
     """
     Test that stateful op with same bytecode, but referencing arrays
@@ -576,10 +573,6 @@ def test_stateful_transform_same_bytecode_different_sizes():
     np.testing.assert_array_equal(np.asarray([False, False, True]), d_out.get())
 
 
-@pytest.mark.xfail(
-    reason="Disk cache conflates ops with identical names referencing different dotted globals (e.g. np.sin vs np.cos)."
-)
-@pytest.mark.no_verify_sass(reason="LDL/STL instructions emitted for this test.")
 def test_transform_caching_with_global_np_ufunc():
     # regression test for a case where if multiple, identically named,
     # ops referenced dotted globals like `np.<func>` those
