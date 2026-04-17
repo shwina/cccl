@@ -72,7 +72,6 @@ CCCL_C_API CUresult cccl_device_unique_by_key_build_ex(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Compile-only step: populates cubin, lowered names, and policy; does NOT load into device.
 CCCL_C_API CUresult cccl_device_unique_by_key_compile(
   cccl_device_unique_by_key_build_result_t* build,
   cccl_iterator_t d_keys_in,
@@ -89,7 +88,6 @@ CCCL_C_API CUresult cccl_device_unique_by_key_compile(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Load step: calls cuLibraryLoadData + cuLibraryGetKernel for compact_init and sweep kernels.
 CCCL_C_API CUresult cccl_device_unique_by_key_load(cccl_device_unique_by_key_build_result_t* build);
 
 CCCL_C_API CUresult cccl_device_unique_by_key(

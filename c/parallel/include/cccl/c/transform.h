@@ -63,7 +63,6 @@ CCCL_C_API CUresult cccl_device_unary_transform_build_ex(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Compile-only step for unary transform: populates cubin, lowered name, and policy; does NOT load into device.
 CCCL_C_API CUresult cccl_device_unary_transform_compile(
   cccl_device_transform_build_result_t* build_ptr,
   cccl_iterator_t d_in,
@@ -77,7 +76,6 @@ CCCL_C_API CUresult cccl_device_unary_transform_compile(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Load step (shared for unary and binary): calls cuLibraryLoadData + cuLibraryGetKernel.
 CCCL_C_API CUresult cccl_device_transform_load(cccl_device_transform_build_result_t* build_ptr);
 
 CCCL_C_API CUresult cccl_device_unary_transform(
@@ -116,7 +114,6 @@ CCCL_C_API CUresult cccl_device_binary_transform_build_ex(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Compile-only step for binary transform: populates cubin, lowered name, and policy; does NOT load into device.
 CCCL_C_API CUresult cccl_device_binary_transform_compile(
   cccl_device_transform_build_result_t* build_ptr,
   cccl_iterator_t d_in1,

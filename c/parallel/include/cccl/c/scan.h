@@ -78,7 +78,6 @@ CCCL_C_API CUresult cccl_device_scan_build_ex(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Compile-only step: populates cubin, lowered names, and policy fields; does NOT load into device.
 CCCL_C_API CUresult cccl_device_scan_compile(
   cccl_device_scan_build_result_t* build_ptr,
   cccl_iterator_t d_in,
@@ -95,7 +94,6 @@ CCCL_C_API CUresult cccl_device_scan_compile(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Load step: calls cuLibraryLoadData + cuLibraryGetKernel for all kernels.
 CCCL_C_API CUresult cccl_device_scan_load(cccl_device_scan_build_result_t* build_ptr);
 
 CCCL_C_API CUresult cccl_device_exclusive_scan(

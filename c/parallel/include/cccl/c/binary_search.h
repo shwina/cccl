@@ -61,7 +61,6 @@ CCCL_C_API CUresult cccl_device_binary_search_build_ex(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Compile-only step: populates cubin and lowered name; does NOT load into device.
 CCCL_C_API CUresult cccl_device_binary_search_compile(
   cccl_device_binary_search_build_result_t* build,
   cccl_binary_search_mode_t mode,
@@ -77,7 +76,6 @@ CCCL_C_API CUresult cccl_device_binary_search_compile(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Load step: calls cuLibraryLoadData + cuLibraryGetKernel.
 CCCL_C_API CUresult cccl_device_binary_search_load(cccl_device_binary_search_build_result_t* build);
 
 CCCL_C_API CUresult cccl_device_binary_search(

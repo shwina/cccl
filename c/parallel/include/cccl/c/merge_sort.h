@@ -72,7 +72,6 @@ CCCL_C_API CUresult cccl_device_merge_sort_build_ex(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Compile-only step: populates cubin, lowered names, and policy; does NOT load into device.
 CCCL_C_API CUresult cccl_device_merge_sort_compile(
   cccl_device_merge_sort_build_result_t* build,
   cccl_iterator_t d_in_keys,
@@ -88,7 +87,6 @@ CCCL_C_API CUresult cccl_device_merge_sort_compile(
   const char* ctk_path,
   cccl_build_config* config);
 
-// Load step: calls cuLibraryLoadData + cuLibraryGetKernel for all kernels.
 CCCL_C_API CUresult cccl_device_merge_sort_load(cccl_device_merge_sort_build_result_t* build);
 
 CCCL_C_API CUresult cccl_device_merge_sort(
