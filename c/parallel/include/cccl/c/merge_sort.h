@@ -35,6 +35,11 @@ typedef struct cccl_device_merge_sort_build_result_t
   CUkernel partition_kernel;
   CUkernel merge_kernel;
   void* runtime_policy;
+  size_t runtime_policy_size;
+  // Lowered (mangled) kernel names, heap-allocated, freed by cccl_device_merge_sort_cleanup():
+  char* block_sort_kernel_lowered_name;
+  char* partition_kernel_lowered_name;
+  char* merge_kernel_lowered_name;
 } cccl_device_merge_sort_build_result_t;
 
 CCCL_C_API CUresult cccl_device_merge_sort_build(
@@ -66,6 +71,25 @@ CCCL_C_API CUresult cccl_device_merge_sort_build_ex(
   const char* libcudacxx_path,
   const char* ctk_path,
   cccl_build_config* config);
+
+// Compile-only step: populates cubin, lowered names, and policy; does NOT load into device.
+CCCL_C_API CUresult cccl_device_merge_sort_compile(
+  cccl_device_merge_sort_build_result_t* build,
+  cccl_iterator_t d_in_keys,
+  cccl_iterator_t d_in_items,
+  cccl_iterator_t d_out_keys,
+  cccl_iterator_t d_out_items,
+  cccl_op_t op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config);
+
+// Load step: calls cuLibraryLoadData + cuLibraryGetKernel for all kernels.
+CCCL_C_API CUresult cccl_device_merge_sort_load(cccl_device_merge_sort_build_result_t* build);
 
 CCCL_C_API CUresult cccl_device_merge_sort(
   cccl_device_merge_sort_build_result_t build,

@@ -31,7 +31,10 @@ typedef struct cccl_device_transform_build_result_t
   CUkernel transform_kernel;
   int loaded_bytes_per_iteration;
   void* runtime_policy;
+  size_t runtime_policy_size;
   void* cache;
+  // Lowered (mangled) kernel name, heap-allocated, freed by cccl_device_transform_cleanup():
+  char* transform_kernel_lowered_name;
 } cccl_device_transform_build_result_t;
 
 CCCL_C_API CUresult cccl_device_unary_transform_build(
@@ -60,6 +63,23 @@ CCCL_C_API CUresult cccl_device_unary_transform_build_ex(
   const char* ctk_path,
   cccl_build_config* config);
 
+// Compile-only step for unary transform: populates cubin, lowered name, and policy; does NOT load into device.
+CCCL_C_API CUresult cccl_device_unary_transform_compile(
+  cccl_device_transform_build_result_t* build_ptr,
+  cccl_iterator_t d_in,
+  cccl_iterator_t d_out,
+  cccl_op_t op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config);
+
+// Load step (shared for unary and binary): calls cuLibraryLoadData + cuLibraryGetKernel.
+CCCL_C_API CUresult cccl_device_transform_load(cccl_device_transform_build_result_t* build_ptr);
+
 CCCL_C_API CUresult cccl_device_unary_transform(
   cccl_device_transform_build_result_t build,
   cccl_iterator_t d_in,
@@ -83,6 +103,21 @@ CCCL_C_API CUresult cccl_device_binary_transform_build(
 
 // Extended version with build configuration
 CCCL_C_API CUresult cccl_device_binary_transform_build_ex(
+  cccl_device_transform_build_result_t* build_ptr,
+  cccl_iterator_t d_in1,
+  cccl_iterator_t d_in2,
+  cccl_iterator_t d_out,
+  cccl_op_t op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config);
+
+// Compile-only step for binary transform: populates cubin, lowered name, and policy; does NOT load into device.
+CCCL_C_API CUresult cccl_device_binary_transform_compile(
   cccl_device_transform_build_result_t* build_ptr,
   cccl_iterator_t d_in1,
   cccl_iterator_t d_in2,

@@ -153,7 +153,7 @@ struct unique_by_key_kernel_source
 };
 } // namespace unique_by_key
 
-CUresult cccl_device_unique_by_key_build_ex(
+CUresult cccl_device_unique_by_key_compile(
   cccl_device_unique_by_key_build_result_t* build_ptr,
   cccl_iterator_t input_keys_it,
   cccl_iterator_t input_values_it,
@@ -355,30 +355,91 @@ static_assert(
       ->add_link_list(linkable_list)
       ->finalize_program();
 
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(
-    cuLibraryGetKernel(&build_ptr->compact_init_kernel, build_ptr->library, compact_init_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->sweep_kernel, build_ptr->library, sweep_kernel_lowered_name.c_str()));
-
   auto [description_bytes_per_tile,
         payload_bytes_per_tile] = get_tile_state_bytes_per_tile(offset_t, offset_cpp, args.data(), args.size(), arch);
 
-  build_ptr->cc                         = cc;
-  build_ptr->cubin                      = (void*) result.data.release();
-  build_ptr->cubin_size                 = result.size;
-  build_ptr->description_bytes_per_tile = description_bytes_per_tile;
-  build_ptr->payload_bytes_per_tile     = payload_bytes_per_tile;
-  build_ptr->runtime_policy             = new cub::detail::unique_by_key::policy_selector{policy_sel};
+  build_ptr->cc                               = cc;
+  build_ptr->cubin                            = (void*) result.data.release();
+  build_ptr->cubin_size                       = result.size;
+  build_ptr->description_bytes_per_tile       = description_bytes_per_tile;
+  build_ptr->payload_bytes_per_tile           = payload_bytes_per_tile;
+  build_ptr->runtime_policy                   = new cub::detail::unique_by_key::policy_selector{policy_sel};
+  build_ptr->runtime_policy_size              = sizeof(cub::detail::unique_by_key::policy_selector);
+  build_ptr->compact_init_kernel_lowered_name = strdup(compact_init_kernel_lowered_name.c_str());
+  build_ptr->sweep_kernel_lowered_name        = strdup(sweep_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
   fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_unique_by_key_build(): %s\n", exc.what());
+  printf("\nEXCEPTION in cccl_device_unique_by_key_compile(): %s\n", exc.what());
   fflush(stdout);
 
   return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_unique_by_key_load(cccl_device_unique_by_key_build_result_t* build)
+try
+{
+  if (build == nullptr || build->cubin == nullptr || build->cubin_size == 0)
+  {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  CUresult status = cuLibraryLoadData(&build->library, build->cubin, nullptr, nullptr, 0, nullptr, nullptr, 0);
+  if (status != CUDA_SUCCESS)
+  {
+    return status;
+  }
+  check(cuLibraryGetKernel(&build->compact_init_kernel, build->library, build->compact_init_kernel_lowered_name));
+  check(cuLibraryGetKernel(&build->sweep_kernel, build->library, build->sweep_kernel_lowered_name));
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  fflush(stderr);
+  printf("\nEXCEPTION in cccl_device_unique_by_key_load(): %s\n", exc.what());
+  fflush(stdout);
+
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_unique_by_key_build_ex(
+  cccl_device_unique_by_key_build_result_t* build_ptr,
+  cccl_iterator_t input_keys_it,
+  cccl_iterator_t input_values_it,
+  cccl_iterator_t output_keys_it,
+  cccl_iterator_t output_values_it,
+  cccl_iterator_t output_num_selected_it,
+  cccl_op_t op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config)
+{
+  CUresult result = cccl_device_unique_by_key_compile(
+    build_ptr,
+    input_keys_it,
+    input_values_it,
+    output_keys_it,
+    output_values_it,
+    output_num_selected_it,
+    op,
+    cc_major,
+    cc_minor,
+    cub_path,
+    thrust_path,
+    libcudacxx_path,
+    ctk_path,
+    config);
+  if (result != CUDA_SUCCESS)
+  {
+    return result;
+  }
+  return cccl_device_unique_by_key_load(build_ptr);
 }
 
 CUresult cccl_device_unique_by_key(
@@ -483,7 +544,12 @@ try
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
   std::unique_ptr<cub::detail::unique_by_key::policy_selector> policy(
     static_cast<cub::detail::unique_by_key::policy_selector*>(build_ptr->runtime_policy));
-  check(cuLibraryUnload(build_ptr->library));
+  std::free(build_ptr->compact_init_kernel_lowered_name);
+  std::free(build_ptr->sweep_kernel_lowered_name);
+  if (build_ptr->library != nullptr)
+  {
+    check(cuLibraryUnload(build_ptr->library));
+  }
 
   return CUDA_SUCCESS;
 }

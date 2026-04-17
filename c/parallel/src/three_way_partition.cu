@@ -114,7 +114,7 @@ struct three_way_partition_num_selected_output_iterator_tag;
 struct three_way_partition_select_first_part_operation_tag;
 struct three_way_partition_select_second_part_operation_tag;
 
-CUresult cccl_device_three_way_partition_build_ex(
+CUresult cccl_device_three_way_partition_compile(
   cccl_device_three_way_partition_build_result_t* build_ptr,
   cccl_iterator_t d_in,
   cccl_iterator_t d_first_part_out,
@@ -273,27 +273,87 @@ static_assert(
       ->add_link_list(linkable_list)
       ->finalize_program();
 
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(&build_ptr->three_way_partition_init_kernel,
-                           build_ptr->library,
-                           three_way_partition_init_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(
-    &build_ptr->three_way_partition_kernel, build_ptr->library, three_way_partition_kernel_lowered_name.c_str()));
-
-  build_ptr->cc             = cc;
-  build_ptr->cubin          = (void*) result.data.release();
-  build_ptr->cubin_size     = result.size;
-  build_ptr->runtime_policy = new cub::detail::three_way_partition::policy_selector{policy_sel};
+  build_ptr->cc                  = cc;
+  build_ptr->cubin               = (void*) result.data.release();
+  build_ptr->cubin_size          = result.size;
+  build_ptr->runtime_policy      = new cub::detail::three_way_partition::policy_selector{policy_sel};
+  build_ptr->runtime_policy_size = sizeof(cub::detail::three_way_partition::policy_selector);
+  build_ptr->three_way_partition_init_kernel_lowered_name =
+    strdup(three_way_partition_init_kernel_lowered_name.c_str());
+  build_ptr->three_way_partition_kernel_lowered_name = strdup(three_way_partition_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
   fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_three_way_partition_build(): %s\n", exc.what());
+  printf("\nEXCEPTION in cccl_device_three_way_partition_compile(): %s\n", exc.what());
   fflush(stdout);
 
   return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_three_way_partition_load(cccl_device_three_way_partition_build_result_t* build)
+try
+{
+  if (build == nullptr || build->cubin == nullptr || build->cubin_size == 0)
+  {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  check(cuLibraryLoadData(&build->library, build->cubin, nullptr, nullptr, 0, nullptr, nullptr, 0));
+  check(cuLibraryGetKernel(
+    &build->three_way_partition_init_kernel, build->library, build->three_way_partition_init_kernel_lowered_name));
+  check(cuLibraryGetKernel(
+    &build->three_way_partition_kernel, build->library, build->three_way_partition_kernel_lowered_name));
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  fflush(stderr);
+  printf("\nEXCEPTION in cccl_device_three_way_partition_load(): %s\n", exc.what());
+  fflush(stdout);
+
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_three_way_partition_build_ex(
+  cccl_device_three_way_partition_build_result_t* build_ptr,
+  cccl_iterator_t d_in,
+  cccl_iterator_t d_first_part_out,
+  cccl_iterator_t d_second_part_out,
+  cccl_iterator_t d_unselected_out,
+  cccl_iterator_t d_num_selected_out,
+  cccl_op_t select_first_part_op,
+  cccl_op_t select_second_part_op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config)
+{
+  CUresult result = cccl_device_three_way_partition_compile(
+    build_ptr,
+    d_in,
+    d_first_part_out,
+    d_second_part_out,
+    d_unselected_out,
+    d_num_selected_out,
+    select_first_part_op,
+    select_second_part_op,
+    cc_major,
+    cc_minor,
+    cub_path,
+    thrust_path,
+    libcudacxx_path,
+    ctk_path,
+    config);
+  if (result != CUDA_SUCCESS)
+  {
+    return result;
+  }
+  return cccl_device_three_way_partition_load(build_ptr);
 }
 
 CUresult cccl_device_three_way_partition(
@@ -375,7 +435,12 @@ try
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(bld_ptr->cubin));
   std::unique_ptr<cub::detail::three_way_partition::policy_selector> policy(
     static_cast<cub::detail::three_way_partition::policy_selector*>(bld_ptr->runtime_policy));
-  check(cuLibraryUnload(bld_ptr->library));
+  std::free(bld_ptr->three_way_partition_init_kernel_lowered_name);
+  std::free(bld_ptr->three_way_partition_kernel_lowered_name);
+  if (bld_ptr->library != nullptr)
+  {
+    check(cuLibraryUnload(bld_ptr->library));
+  }
 
   return CUDA_SUCCESS;
 }

@@ -32,6 +32,10 @@ typedef struct cccl_device_three_way_partition_build_result_t
   CUkernel three_way_partition_init_kernel;
   CUkernel three_way_partition_kernel;
   void* runtime_policy;
+  size_t runtime_policy_size;
+  // Lowered (mangled) kernel names, heap-allocated, freed by cccl_device_three_way_partition_cleanup():
+  char* three_way_partition_init_kernel_lowered_name;
+  char* three_way_partition_kernel_lowered_name;
 } cccl_device_three_way_partition_build_result_t;
 
 // TODO return a union of nvtx/cuda/nvrtc errors or a string?
@@ -68,6 +72,27 @@ CCCL_C_API CUresult cccl_device_three_way_partition_build_ex(
   const char* libcudacxx_path,
   const char* ctk_path,
   cccl_build_config* config);
+
+// Compile-only step: populates cubin, lowered names, and policy; does NOT load into device.
+CCCL_C_API CUresult cccl_device_three_way_partition_compile(
+  cccl_device_three_way_partition_build_result_t* build,
+  cccl_iterator_t d_in,
+  cccl_iterator_t d_first_part_out,
+  cccl_iterator_t d_second_part_out,
+  cccl_iterator_t d_unselected_out,
+  cccl_iterator_t d_num_selected_out,
+  cccl_op_t select_first_part_op,
+  cccl_op_t select_second_part_op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config);
+
+// Load step: calls cuLibraryLoadData + cuLibraryGetKernel for init and partition kernels.
+CCCL_C_API CUresult cccl_device_three_way_partition_load(cccl_device_three_way_partition_build_result_t* build);
 
 CCCL_C_API CUresult cccl_device_three_way_partition(
   cccl_device_three_way_partition_build_result_t build,

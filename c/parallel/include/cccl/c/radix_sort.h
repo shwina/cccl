@@ -43,6 +43,17 @@ typedef struct cccl_device_radix_sort_build_result_t
   CUkernel onesweep_kernel;
   cccl_sort_order_t order;
   void* runtime_policy;
+  size_t runtime_policy_size;
+  // Lowered (mangled) kernel names, heap-allocated, freed by cccl_device_radix_sort_cleanup():
+  char* single_tile_kernel_lowered_name;
+  char* upsweep_kernel_lowered_name;
+  char* alt_upsweep_kernel_lowered_name;
+  char* scan_bins_kernel_lowered_name;
+  char* downsweep_kernel_lowered_name;
+  char* alt_downsweep_kernel_lowered_name;
+  char* histogram_kernel_lowered_name;
+  char* exclusive_sum_kernel_lowered_name;
+  char* onesweep_kernel_lowered_name;
 } cccl_device_radix_sort_build_result_t;
 
 CCCL_C_API CUresult cccl_device_radix_sort_build(
@@ -74,6 +85,25 @@ CCCL_C_API CUresult cccl_device_radix_sort_build_ex(
   const char* libcudacxx_path,
   const char* ctk_path,
   cccl_build_config* config);
+
+// Compile-only step: populates cubin, lowered names, and policy; does NOT load into device.
+CCCL_C_API CUresult cccl_device_radix_sort_compile(
+  cccl_device_radix_sort_build_result_t* build,
+  cccl_sort_order_t sort_order,
+  cccl_iterator_t input_keys_it,
+  cccl_iterator_t input_values_it,
+  cccl_op_t decomposer,
+  const char* decomposer_return_type,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config);
+
+// Load step: calls cuLibraryLoadData + cuLibraryGetKernel for all 9 kernels.
+CCCL_C_API CUresult cccl_device_radix_sort_load(cccl_device_radix_sort_build_result_t* build);
 
 CCCL_C_API CUresult cccl_device_radix_sort(
   cccl_device_radix_sort_build_result_t build,

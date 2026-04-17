@@ -19,6 +19,7 @@
 #include "cub/util_type.cuh"
 #include "kernels/operators.h"
 #include "util/context.h"
+#include "util/errors.h"
 #include "util/indirect_arg.h"
 #include "util/types.h"
 #include <cccl/c/radix_sort.h>
@@ -193,7 +194,7 @@ struct radix_sort_kernel_source
 };
 } // namespace radix_sort
 
-CUresult cccl_device_radix_sort_build_ex(
+CUresult cccl_device_radix_sort_compile(
   cccl_device_radix_sort_build_result_t* build_ptr,
   cccl_sort_order_t sort_order,
   cccl_iterator_t input_keys_it,
@@ -351,38 +352,101 @@ static_assert(device_radix_sort_policy()(current_tuning_arch()) == {6}, "Host ge
       ->add_link_list(linkable_list)
       ->finalize_program();
 
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(
-    cuLibraryGetKernel(&build_ptr->single_tile_kernel, build_ptr->library, single_tile_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->upsweep_kernel, build_ptr->library, upsweep_kernel_lowered_name.c_str()));
-  check(
-    cuLibraryGetKernel(&build_ptr->alt_upsweep_kernel, build_ptr->library, alt_upsweep_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->scan_bins_kernel, build_ptr->library, scan_bins_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->downsweep_kernel, build_ptr->library, downsweep_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(
-    &build_ptr->alt_downsweep_kernel, build_ptr->library, alt_downsweep_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->histogram_kernel, build_ptr->library, histogram_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(
-    &build_ptr->exclusive_sum_kernel, build_ptr->library, exclusive_sum_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->onesweep_kernel, build_ptr->library, onesweep_kernel_lowered_name.c_str()));
-
-  build_ptr->cc             = cc_major * 10 + cc_minor;
-  build_ptr->cubin          = (void*) result.data.release();
-  build_ptr->cubin_size     = result.size;
-  build_ptr->key_type       = input_keys_it.value_type;
-  build_ptr->value_type     = input_values_it.value_type;
-  build_ptr->order          = sort_order;
-  build_ptr->runtime_policy = new cub::detail::radix_sort::policy_selector{policy_sel};
+  build_ptr->cc                                = cc_major * 10 + cc_minor;
+  build_ptr->cubin                             = (void*) result.data.release();
+  build_ptr->cubin_size                        = result.size;
+  build_ptr->key_type                          = input_keys_it.value_type;
+  build_ptr->value_type                        = input_values_it.value_type;
+  build_ptr->order                             = sort_order;
+  build_ptr->runtime_policy                    = new cub::detail::radix_sort::policy_selector{policy_sel};
+  build_ptr->runtime_policy_size               = sizeof(cub::detail::radix_sort::policy_selector);
+  build_ptr->single_tile_kernel_lowered_name   = strdup(single_tile_kernel_lowered_name.c_str());
+  build_ptr->upsweep_kernel_lowered_name       = strdup(upsweep_kernel_lowered_name.c_str());
+  build_ptr->alt_upsweep_kernel_lowered_name   = strdup(alt_upsweep_kernel_lowered_name.c_str());
+  build_ptr->scan_bins_kernel_lowered_name     = strdup(scan_bins_kernel_lowered_name.c_str());
+  build_ptr->downsweep_kernel_lowered_name     = strdup(downsweep_kernel_lowered_name.c_str());
+  build_ptr->alt_downsweep_kernel_lowered_name = strdup(alt_downsweep_kernel_lowered_name.c_str());
+  build_ptr->histogram_kernel_lowered_name     = strdup(histogram_kernel_lowered_name.c_str());
+  build_ptr->exclusive_sum_kernel_lowered_name = strdup(exclusive_sum_kernel_lowered_name.c_str());
+  build_ptr->onesweep_kernel_lowered_name      = strdup(onesweep_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
   fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_radix_sort_build(): %s\n", exc.what());
+  printf("\nEXCEPTION in cccl_device_radix_sort_compile(): %s\n", exc.what());
   fflush(stdout);
 
   return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_radix_sort_load(cccl_device_radix_sort_build_result_t* build_ptr)
+try
+{
+  if (build_ptr == nullptr || build_ptr->cubin == nullptr || build_ptr->cubin_size == 0)
+  {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  check(cuLibraryLoadData(&build_ptr->library, build_ptr->cubin, nullptr, nullptr, 0, nullptr, nullptr, 0));
+  check(
+    cuLibraryGetKernel(&build_ptr->single_tile_kernel, build_ptr->library, build_ptr->single_tile_kernel_lowered_name));
+  check(cuLibraryGetKernel(&build_ptr->upsweep_kernel, build_ptr->library, build_ptr->upsweep_kernel_lowered_name));
+  check(
+    cuLibraryGetKernel(&build_ptr->alt_upsweep_kernel, build_ptr->library, build_ptr->alt_upsweep_kernel_lowered_name));
+  check(cuLibraryGetKernel(&build_ptr->scan_bins_kernel, build_ptr->library, build_ptr->scan_bins_kernel_lowered_name));
+  check(cuLibraryGetKernel(&build_ptr->downsweep_kernel, build_ptr->library, build_ptr->downsweep_kernel_lowered_name));
+  check(cuLibraryGetKernel(
+    &build_ptr->alt_downsweep_kernel, build_ptr->library, build_ptr->alt_downsweep_kernel_lowered_name));
+  check(cuLibraryGetKernel(&build_ptr->histogram_kernel, build_ptr->library, build_ptr->histogram_kernel_lowered_name));
+  check(cuLibraryGetKernel(
+    &build_ptr->exclusive_sum_kernel, build_ptr->library, build_ptr->exclusive_sum_kernel_lowered_name));
+  check(cuLibraryGetKernel(&build_ptr->onesweep_kernel, build_ptr->library, build_ptr->onesweep_kernel_lowered_name));
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  fflush(stderr);
+  printf("\nEXCEPTION in cccl_device_radix_sort_load(): %s\n", exc.what());
+  fflush(stdout);
+
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_radix_sort_build_ex(
+  cccl_device_radix_sort_build_result_t* build_ptr,
+  cccl_sort_order_t sort_order,
+  cccl_iterator_t input_keys_it,
+  cccl_iterator_t input_values_it,
+  cccl_op_t decomposer,
+  const char* decomposer_return_type,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config)
+{
+  CUresult r = cccl_device_radix_sort_compile(
+    build_ptr,
+    sort_order,
+    input_keys_it,
+    input_values_it,
+    decomposer,
+    decomposer_return_type,
+    cc_major,
+    cc_minor,
+    cub_path,
+    thrust_path,
+    libcudacxx_path,
+    ctk_path,
+    config);
+  if (r != CUDA_SUCCESS)
+  {
+    return r;
+  }
+  return cccl_device_radix_sort_load(build_ptr);
 }
 
 template <cub::SortOrder Order>
@@ -544,7 +608,19 @@ try
   using namespace cub::detail::radix_sort;
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
   std::unique_ptr<policy_selector> policy(static_cast<policy_selector*>(build_ptr->runtime_policy));
-  check(cuLibraryUnload(build_ptr->library));
+  std::free(build_ptr->single_tile_kernel_lowered_name);
+  std::free(build_ptr->upsweep_kernel_lowered_name);
+  std::free(build_ptr->alt_upsweep_kernel_lowered_name);
+  std::free(build_ptr->scan_bins_kernel_lowered_name);
+  std::free(build_ptr->downsweep_kernel_lowered_name);
+  std::free(build_ptr->alt_downsweep_kernel_lowered_name);
+  std::free(build_ptr->histogram_kernel_lowered_name);
+  std::free(build_ptr->exclusive_sum_kernel_lowered_name);
+  std::free(build_ptr->onesweep_kernel_lowered_name);
+  if (build_ptr->library != nullptr)
+  {
+    check(cuLibraryUnload(build_ptr->library));
+  }
 
   return CUDA_SUCCESS;
 }

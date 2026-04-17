@@ -120,6 +120,10 @@ struct transform_kernel_source
   CacheAsyncConfiguration(const ActionT& action)
   {
     auto cache = reinterpret_cast<transform::cache*>(build.cache);
+    if (cache == nullptr)
+    {
+      return action();
+    }
     if (!cache->async_config.has_value())
     {
       cache->async_config = action();
@@ -132,6 +136,10 @@ struct transform_kernel_source
   CachePrefetchConfiguration(const ActionT& action)
   {
     auto cache = reinterpret_cast<transform::cache*>(build.cache);
+    if (cache == nullptr)
+    {
+      return action();
+    }
     if (!cache->prefetch_config.has_value())
     {
       cache->prefetch_config = action();
@@ -195,7 +203,7 @@ auto make_iterator_info(cccl_iterator_t it) -> cub::detail::iterator_info
 }
 } // namespace transform
 
-CUresult cccl_device_unary_transform_build_ex(
+CUresult cccl_device_unary_transform_compile(
   cccl_device_transform_build_result_t* build_ptr,
   cccl_iterator_t input_it,
   cccl_iterator_t output_it,
@@ -317,18 +325,16 @@ static_assert(device_transform_policy()(detail::current_tuning_arch()) == {9}, "
       ->add_link_list(linkable_list)
       ->finalize_program();
 
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(&build_ptr->transform_kernel, build_ptr->library, kernel_lowered_name.c_str()));
-
-  build_ptr->loaded_bytes_per_iteration = static_cast<int>(input_it.value_type.size);
-  build_ptr->cc                         = cc_major * 10 + cc_minor;
-  build_ptr->cubin                      = (void*) result.data.release();
-  build_ptr->cubin_size                 = result.size;
-  build_ptr->cache                      = new transform::cache();
+  build_ptr->loaded_bytes_per_iteration    = static_cast<int>(input_it.value_type.size);
+  build_ptr->cc                            = cc_major * 10 + cc_minor;
+  build_ptr->cubin                         = (void*) result.data.release();
+  build_ptr->cubin_size                    = result.size;
+  build_ptr->cache                         = new transform::cache();
+  build_ptr->transform_kernel_lowered_name = strdup(kernel_lowered_name.c_str());
 
   // avoid new and delete which requires the allocated and freed types to match
-  static_assert(std::is_trivially_copyable_v<decltype(policy_sel)>);
-  build_ptr->runtime_policy = std::malloc(sizeof(policy_sel));
+  build_ptr->runtime_policy      = std::malloc(sizeof(policy_sel));
+  build_ptr->runtime_policy_size = sizeof(policy_sel);
   std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
 
   return CUDA_SUCCESS;
@@ -336,9 +342,50 @@ static_assert(device_transform_policy()(detail::current_tuning_arch()) == {9}, "
 catch (const std::exception& exc)
 {
   fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_unary_transform_build(): %s\n", exc.what());
+  printf("\nEXCEPTION in cccl_device_unary_transform_compile(): %s\n", exc.what());
   fflush(stdout);
   return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_transform_load(cccl_device_transform_build_result_t* build_ptr)
+try
+{
+  if (build_ptr == nullptr || build_ptr->cubin == nullptr || build_ptr->cubin_size == 0)
+  {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  check(cuLibraryLoadData(&build_ptr->library, build_ptr->cubin, nullptr, nullptr, 0, nullptr, nullptr, 0));
+  check(cuLibraryGetKernel(&build_ptr->transform_kernel, build_ptr->library, build_ptr->transform_kernel_lowered_name));
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  fflush(stderr);
+  printf("\nEXCEPTION in cccl_device_transform_load(): %s\n", exc.what());
+  fflush(stdout);
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_unary_transform_build_ex(
+  cccl_device_transform_build_result_t* build_ptr,
+  cccl_iterator_t input_it,
+  cccl_iterator_t output_it,
+  cccl_op_t op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config)
+{
+  CUresult r = cccl_device_unary_transform_compile(
+    build_ptr, input_it, output_it, op, cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, ctk_path, config);
+  if (r != CUDA_SUCCESS)
+  {
+    return r;
+  }
+  return cccl_device_transform_load(build_ptr);
 }
 
 CUresult cccl_device_unary_transform(
@@ -383,7 +430,7 @@ CUresult cccl_device_unary_transform(
   return error;
 }
 
-CUresult cccl_device_binary_transform_build_ex(
+CUresult cccl_device_binary_transform_compile(
   cccl_device_transform_build_result_t* build_ptr,
   cccl_iterator_t input1_it,
   cccl_iterator_t input2_it,
@@ -518,18 +565,16 @@ static_assert(device_transform_policy()(detail::current_tuning_arch()) == {12}, 
       ->add_link_list(linkable_list)
       ->finalize_program();
 
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(&build_ptr->transform_kernel, build_ptr->library, kernel_lowered_name.c_str()));
-
-  build_ptr->loaded_bytes_per_iteration = static_cast<int>((input1_it.value_type.size + input2_it.value_type.size));
-  build_ptr->cc                         = cc_major * 10 + cc_minor;
-  build_ptr->cubin                      = (void*) result.data.release();
-  build_ptr->cubin_size                 = result.size;
-  build_ptr->cache                      = new transform::cache();
+  build_ptr->loaded_bytes_per_iteration    = static_cast<int>((input1_it.value_type.size + input2_it.value_type.size));
+  build_ptr->cc                            = cc_major * 10 + cc_minor;
+  build_ptr->cubin                         = (void*) result.data.release();
+  build_ptr->cubin_size                    = result.size;
+  build_ptr->cache                         = new transform::cache();
+  build_ptr->transform_kernel_lowered_name = strdup(kernel_lowered_name.c_str());
 
   // avoid new and delete which requires the allocated and freed types to match
-  static_assert(std::is_trivially_copyable_v<decltype(policy_sel)>);
-  build_ptr->runtime_policy = std::malloc(sizeof(policy_sel));
+  build_ptr->runtime_policy      = std::malloc(sizeof(policy_sel));
+  build_ptr->runtime_policy_size = sizeof(policy_sel);
   std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
 
   return CUDA_SUCCESS;
@@ -537,9 +582,43 @@ static_assert(device_transform_policy()(detail::current_tuning_arch()) == {12}, 
 catch (const std::exception& exc)
 {
   fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_binary_transform_build(): %s\n", exc.what());
+  printf("\nEXCEPTION in cccl_device_binary_transform_compile(): %s\n", exc.what());
   fflush(stdout);
   return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_binary_transform_build_ex(
+  cccl_device_transform_build_result_t* build_ptr,
+  cccl_iterator_t input1_it,
+  cccl_iterator_t input2_it,
+  cccl_iterator_t output_it,
+  cccl_op_t op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config)
+{
+  CUresult r = cccl_device_binary_transform_compile(
+    build_ptr,
+    input1_it,
+    input2_it,
+    output_it,
+    op,
+    cc_major,
+    cc_minor,
+    cub_path,
+    thrust_path,
+    libcudacxx_path,
+    ctk_path,
+    config);
+  if (r != CUDA_SUCCESS)
+  {
+    return r;
+  }
+  return cccl_device_transform_load(build_ptr);
 }
 
 CUresult cccl_device_binary_transform(
@@ -631,8 +710,12 @@ try
   using namespace cub::detail::transform;
   std::unique_ptr<char[]> cubin(static_cast<char*>(build_ptr->cubin));
   std::free(build_ptr->runtime_policy);
+  std::free(build_ptr->transform_kernel_lowered_name);
   std::unique_ptr<transform::cache> cache(static_cast<transform::cache*>(build_ptr->cache));
-  check(cuLibraryUnload(build_ptr->library));
+  if (build_ptr->library != nullptr)
+  {
+    check(cuLibraryUnload(build_ptr->library));
+  }
 
   return CUDA_SUCCESS;
 }

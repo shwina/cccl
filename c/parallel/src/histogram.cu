@@ -19,6 +19,7 @@
 #include "cccl/c/types.h"
 #include "kernels/iterators.h"
 #include "util/context.h"
+#include "util/errors.h"
 #include "util/indirect_arg.h"
 #include "util/types.h"
 #include <cccl/c/histogram.h>
@@ -222,7 +223,7 @@ bool check_histogram_overflow(
 }
 } // namespace histogram
 
-CUresult cccl_device_histogram_build_ex(
+CUresult cccl_device_histogram_compile(
   cccl_device_histogram_build_result_t* build_ptr,
   int num_channels,
   int num_active_channels,
@@ -376,10 +377,6 @@ static_assert(device_histogram_policy()(detail::current_tuning_arch()) == {4}, "
       ->add_link_list(linkable_list)
       ->finalize_program();
 
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(&build_ptr->init_kernel, build_ptr->library, init_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->sweep_kernel, build_ptr->library, sweep_kernel_lowered_name.c_str()));
-
   build_ptr->cc                  = cc;
   build_ptr->cubin               = (void*) result.data.release();
   build_ptr->cubin_size          = result.size;
@@ -389,16 +386,87 @@ static_assert(device_histogram_policy()(detail::current_tuning_arch()) == {4}, "
   build_ptr->num_active_channels = num_active_channels;
   build_ptr->may_overflow = false; // This is set in cccl_device_histogram_even_impl so that kernel source can access
                                    // it later.
-  build_ptr->runtime_policy = new cub::detail::histogram::policy_selector{policy_sel};
+  build_ptr->runtime_policy            = new cub::detail::histogram::policy_selector{policy_sel};
+  build_ptr->runtime_policy_size       = sizeof(cub::detail::histogram::policy_selector);
+  build_ptr->init_kernel_lowered_name  = strdup(init_kernel_lowered_name.c_str());
+  build_ptr->sweep_kernel_lowered_name = strdup(sweep_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
   fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_histogram_build(): %s\n", exc.what());
+  printf("\nEXCEPTION in cccl_device_histogram_compile(): %s\n", exc.what());
   fflush(stdout);
   return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_histogram_load(cccl_device_histogram_build_result_t* build_ptr)
+try
+{
+  if (build_ptr == nullptr || build_ptr->cubin == nullptr || build_ptr->cubin_size == 0)
+  {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  CUresult status = cuLibraryLoadData(&build_ptr->library, build_ptr->cubin, nullptr, nullptr, 0, nullptr, nullptr, 0);
+  if (status != CUDA_SUCCESS)
+  {
+    return status;
+  }
+  check(cuLibraryGetKernel(&build_ptr->init_kernel, build_ptr->library, build_ptr->init_kernel_lowered_name));
+  check(cuLibraryGetKernel(&build_ptr->sweep_kernel, build_ptr->library, build_ptr->sweep_kernel_lowered_name));
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  fflush(stderr);
+  printf("\nEXCEPTION in cccl_device_histogram_load(): %s\n", exc.what());
+  fflush(stdout);
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_histogram_build_ex(
+  cccl_device_histogram_build_result_t* build_ptr,
+  int num_channels,
+  int num_active_channels,
+  cccl_iterator_t d_samples,
+  int num_output_levels_val,
+  cccl_iterator_t d_output_histograms,
+  cccl_value_t lower_level,
+  int64_t num_rows,
+  int64_t row_stride_samples,
+  bool is_evenly_segmented,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config)
+{
+  CUresult r = cccl_device_histogram_compile(
+    build_ptr,
+    num_channels,
+    num_active_channels,
+    d_samples,
+    num_output_levels_val,
+    d_output_histograms,
+    lower_level,
+    num_rows,
+    row_stride_samples,
+    is_evenly_segmented,
+    cc_major,
+    cc_minor,
+    cub_path,
+    thrust_path,
+    libcudacxx_path,
+    ctk_path,
+    config);
+  if (r != CUDA_SUCCESS)
+  {
+    return r;
+  }
+  return cccl_device_histogram_load(build_ptr);
 }
 
 template <typename is_byte_sample>
@@ -573,7 +641,12 @@ try
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
   std::unique_ptr<cub::detail::histogram::policy_selector> policy(
     static_cast<cub::detail::histogram::policy_selector*>(build_ptr->runtime_policy));
-  check(cuLibraryUnload(build_ptr->library));
+  std::free(build_ptr->init_kernel_lowered_name);
+  std::free(build_ptr->sweep_kernel_lowered_name);
+  if (build_ptr->library != nullptr)
+  {
+    check(cuLibraryUnload(build_ptr->library));
+  }
 
   return CUDA_SUCCESS;
 }

@@ -40,8 +40,16 @@ typedef struct cccl_device_segmented_sort_build_result_t
   CUkernel three_way_partition_init_kernel;
   CUkernel three_way_partition_kernel;
   void* runtime_policy;
+  size_t runtime_policy_size;
   void* partition_runtime_policy;
+  size_t partition_runtime_policy_size;
   cccl_sort_order_t order;
+  // Lowered (mangled) kernel names, heap-allocated, freed by cccl_device_segmented_sort_cleanup():
+  char* segmented_sort_fallback_kernel_lowered_name;
+  char* segmented_sort_kernel_small_lowered_name;
+  char* segmented_sort_kernel_large_lowered_name;
+  char* three_way_partition_init_kernel_lowered_name;
+  char* three_way_partition_kernel_lowered_name;
 } cccl_device_segmented_sort_build_result_t;
 
 // TODO return a union of nvtx/cuda/nvrtc errors or a string?
@@ -74,6 +82,25 @@ CCCL_C_API CUresult cccl_device_segmented_sort_build_ex(
   const char* libcudacxx_path,
   const char* ctk_path,
   cccl_build_config* config);
+
+// Compile-only step: populates cubin, lowered names, and policy; does NOT load into device.
+CCCL_C_API CUresult cccl_device_segmented_sort_compile(
+  cccl_device_segmented_sort_build_result_t* build,
+  cccl_sort_order_t sort_order,
+  cccl_iterator_t d_keys_in,
+  cccl_iterator_t d_values_in,
+  cccl_iterator_t begin_offset_in,
+  cccl_iterator_t end_offset_in,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config);
+
+// Load step: calls cuLibraryLoadData + cuLibraryGetKernel for all 5 kernels.
+CCCL_C_API CUresult cccl_device_segmented_sort_load(cccl_device_segmented_sort_build_result_t* build);
 
 CCCL_C_API CUresult cccl_device_segmented_sort(
   cccl_device_segmented_sort_build_result_t build,

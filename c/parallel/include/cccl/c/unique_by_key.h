@@ -34,6 +34,10 @@ typedef struct cccl_device_unique_by_key_build_result_t
   size_t description_bytes_per_tile;
   size_t payload_bytes_per_tile;
   void* runtime_policy;
+  size_t runtime_policy_size;
+  // Lowered (mangled) kernel names, heap-allocated, freed by cccl_device_unique_by_key_cleanup():
+  char* compact_init_kernel_lowered_name;
+  char* sweep_kernel_lowered_name;
 } cccl_device_unique_by_key_build_result_t;
 
 CCCL_C_API CUresult cccl_device_unique_by_key_build(
@@ -67,6 +71,26 @@ CCCL_C_API CUresult cccl_device_unique_by_key_build_ex(
   const char* libcudacxx_path,
   const char* ctk_path,
   cccl_build_config* config);
+
+// Compile-only step: populates cubin, lowered names, and policy; does NOT load into device.
+CCCL_C_API CUresult cccl_device_unique_by_key_compile(
+  cccl_device_unique_by_key_build_result_t* build,
+  cccl_iterator_t d_keys_in,
+  cccl_iterator_t d_values_in,
+  cccl_iterator_t d_keys_out,
+  cccl_iterator_t d_values_out,
+  cccl_iterator_t d_num_selected_out,
+  cccl_op_t op,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config);
+
+// Load step: calls cuLibraryLoadData + cuLibraryGetKernel for compact_init and sweep kernels.
+CCCL_C_API CUresult cccl_device_unique_by_key_load(cccl_device_unique_by_key_build_result_t* build);
 
 CCCL_C_API CUresult cccl_device_unique_by_key(
   cccl_device_unique_by_key_build_result_t build,

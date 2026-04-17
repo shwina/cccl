@@ -238,7 +238,7 @@ struct scan_kernel_source
 };
 } // namespace scan
 
-CUresult cccl_device_scan_build_ex(
+CUresult cccl_device_scan_compile(
   cccl_device_scan_build_result_t* build_ptr,
   cccl_iterator_t input_it,
   cccl_iterator_t output_it,
@@ -421,10 +421,6 @@ static_assert(device_scan_policy()(detail::current_tuning_arch()) == {6}, "Host 
       ->add_link_list(linkable_list)
       ->finalize_program();
 
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(&build_ptr->init_kernel, build_ptr->library, init_kernel_lowered_name.c_str()));
-  check(cuLibraryGetKernel(&build_ptr->scan_kernel, build_ptr->library, scan_kernel_lowered_name.c_str()));
-
   auto [description_bytes_per_tile,
         payload_bytes_per_tile] = get_tile_state_bytes_per_tile(accum_t, accum_cpp, args.data(), args.size(), arch);
 
@@ -439,13 +435,41 @@ static_assert(device_scan_policy()(detail::current_tuning_arch()) == {6}, "Host 
   build_ptr->description_bytes_per_tile = description_bytes_per_tile;
   build_ptr->payload_bytes_per_tile     = payload_bytes_per_tile;
   build_ptr->runtime_policy             = new cub::detail::scan::policy_selector{policy_sel};
+  build_ptr->runtime_policy_size        = sizeof(cub::detail::scan::policy_selector);
+  build_ptr->init_kernel_lowered_name   = strdup(init_kernel_lowered_name.c_str());
+  build_ptr->scan_kernel_lowered_name   = strdup(scan_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
   fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_scan_build(): %s\n", exc.what());
+  printf("\nEXCEPTION in cccl_device_scan_compile(): %s\n", exc.what());
+  fflush(stdout);
+
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_scan_load(cccl_device_scan_build_result_t* build_ptr)
+try
+{
+  if (build_ptr == nullptr || build_ptr->cubin == nullptr || build_ptr->cubin_size == 0)
+  {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  CUresult status = cuLibraryLoadData(&build_ptr->library, build_ptr->cubin, nullptr, nullptr, 0, nullptr, nullptr, 0);
+  if (status != CUDA_SUCCESS)
+  {
+    return status;
+  }
+  check(cuLibraryGetKernel(&build_ptr->init_kernel, build_ptr->library, build_ptr->init_kernel_lowered_name));
+  check(cuLibraryGetKernel(&build_ptr->scan_kernel, build_ptr->library, build_ptr->scan_kernel_lowered_name));
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  fflush(stderr);
+  printf("\nEXCEPTION in cccl_device_scan_load(): %s\n", exc.what());
   fflush(stdout);
 
   return CUDA_ERROR_UNKNOWN;
@@ -585,6 +609,44 @@ CUresult cccl_device_inclusive_scan_no_init(
     build, d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, op, cub::NullType{}, stream);
 }
 
+CUresult cccl_device_scan_build_ex(
+  cccl_device_scan_build_result_t* build_ptr,
+  cccl_iterator_t d_in,
+  cccl_iterator_t d_out,
+  cccl_op_t op,
+  cccl_type_info init,
+  bool force_inclusive,
+  cccl_init_kind_t init_kind,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config)
+{
+  CUresult r = cccl_device_scan_compile(
+    build_ptr,
+    d_in,
+    d_out,
+    op,
+    init,
+    force_inclusive,
+    init_kind,
+    cc_major,
+    cc_minor,
+    cub_path,
+    thrust_path,
+    libcudacxx_path,
+    ctk_path,
+    config);
+  if (r != CUDA_SUCCESS)
+  {
+    return r;
+  }
+  return cccl_device_scan_load(build_ptr);
+}
+
 CUresult cccl_device_scan_build(
   cccl_device_scan_build_result_t* build_ptr,
   cccl_iterator_t d_in,
@@ -627,7 +689,12 @@ try
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
   std::unique_ptr<cub::detail::scan::policy_selector> policy(
     static_cast<cub::detail::scan::policy_selector*>(build_ptr->runtime_policy));
-  check(cuLibraryUnload(build_ptr->library));
+  std::free(build_ptr->init_kernel_lowered_name);
+  std::free(build_ptr->scan_kernel_lowered_name);
+  if (build_ptr->library != nullptr)
+  {
+    check(cuLibraryUnload(build_ptr->library));
+  }
 
   return CUDA_SUCCESS;
 }

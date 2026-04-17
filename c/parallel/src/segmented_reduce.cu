@@ -112,7 +112,7 @@ struct segmented_reduce_start_offset_iterator_tag;
 struct segmented_reduce_end_offset_iterator_tag;
 struct segmented_reduce_operation_tag;
 
-CUresult cccl_device_segmented_reduce_build_ex(
+CUresult cccl_device_segmented_reduce_compile(
   cccl_device_segmented_reduce_build_result_t* build_ptr,
   cccl_iterator_t input_it,
   cccl_iterator_t output_it,
@@ -261,26 +261,82 @@ static_assert(
       ->add_link_list(linkable_list)
       ->finalize_program();
 
-  // populate build struct members
-  cuLibraryLoadData(&build_ptr->library, result.data.get(), nullptr, nullptr, 0, nullptr, nullptr, 0);
-  check(cuLibraryGetKernel(
-    &build_ptr->segmented_reduce_kernel, build_ptr->library, segmented_reduce_kernel_lowered_name.c_str()));
-
-  build_ptr->cc               = cc_major * 10 + cc_minor;
-  build_ptr->cubin            = (void*) result.data.release();
-  build_ptr->cubin_size       = result.size;
-  build_ptr->accumulator_size = accum_t.size;
-  build_ptr->runtime_policy   = new cub::detail::segmented_reduce::policy_selector{policy_sel};
+  build_ptr->cc                                   = cc_major * 10 + cc_minor;
+  build_ptr->cubin                                = (void*) result.data.release();
+  build_ptr->cubin_size                           = result.size;
+  build_ptr->accumulator_size                     = accum_t.size;
+  build_ptr->runtime_policy                       = new cub::detail::segmented_reduce::policy_selector{policy_sel};
+  build_ptr->runtime_policy_size                  = sizeof(cub::detail::segmented_reduce::policy_selector);
+  build_ptr->segmented_reduce_kernel_lowered_name = strdup(segmented_reduce_kernel_lowered_name.c_str());
 
   return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
   fflush(stderr);
-  printf("\nEXCEPTION in cccl_device_segmented_reduce_build(): %s\n", exc.what());
+  printf("\nEXCEPTION in cccl_device_segmented_reduce_compile(): %s\n", exc.what());
   fflush(stdout);
 
   return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_segmented_reduce_load(cccl_device_segmented_reduce_build_result_t* build_ptr)
+try
+{
+  if (build_ptr == nullptr || build_ptr->cubin == nullptr || build_ptr->cubin_size == 0)
+  {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  check(cuLibraryLoadData(&build_ptr->library, build_ptr->cubin, nullptr, nullptr, 0, nullptr, nullptr, 0));
+  check(cuLibraryGetKernel(
+    &build_ptr->segmented_reduce_kernel, build_ptr->library, build_ptr->segmented_reduce_kernel_lowered_name));
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  fflush(stderr);
+  printf("\nEXCEPTION in cccl_device_segmented_reduce_load(): %s\n", exc.what());
+  fflush(stdout);
+
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_segmented_reduce_build_ex(
+  cccl_device_segmented_reduce_build_result_t* build_ptr,
+  cccl_iterator_t input_it,
+  cccl_iterator_t output_it,
+  cccl_iterator_t start_offset_it,
+  cccl_iterator_t end_offset_it,
+  cccl_op_t op,
+  cccl_value_t init,
+  int cc_major,
+  int cc_minor,
+  const char* cub_path,
+  const char* thrust_path,
+  const char* libcudacxx_path,
+  const char* ctk_path,
+  cccl_build_config* config)
+{
+  CUresult r = cccl_device_segmented_reduce_compile(
+    build_ptr,
+    input_it,
+    output_it,
+    start_offset_it,
+    end_offset_it,
+    op,
+    init,
+    cc_major,
+    cc_minor,
+    cub_path,
+    thrust_path,
+    libcudacxx_path,
+    ctk_path,
+    config);
+  if (r != CUDA_SUCCESS)
+  {
+    return r;
+  }
+  return cccl_device_segmented_reduce_load(build_ptr);
 }
 
 CUresult cccl_device_segmented_reduce(
@@ -385,7 +441,11 @@ try
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
   std::unique_ptr<cub::detail::segmented_reduce::policy_selector> policy(
     static_cast<cub::detail::segmented_reduce::policy_selector*>(build_ptr->runtime_policy));
-  check(cuLibraryUnload(build_ptr->library));
+  std::free(build_ptr->segmented_reduce_kernel_lowered_name);
+  if (build_ptr->library != nullptr)
+  {
+    check(cuLibraryUnload(build_ptr->library));
+  }
 
   return CUDA_SUCCESS;
 }
