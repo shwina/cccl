@@ -13,7 +13,6 @@
 #include <cub/device/device_merge_sort.cuh>
 #include <cub/device/dispatch/tuning/tuning_merge_sort.cuh>
 
-#include <cstring> // strdup, free
 #include <format>
 #include <sstream>
 #include <vector>
@@ -341,9 +340,9 @@ static_assert(device_merge_sort_policy()(detail::current_tuning_arch()) == {10},
   build_ptr->item_type                      = input_items_it.value_type;
   build_ptr->runtime_policy                 = new cub::detail::merge_sort::policy_selector{policy_sel};
   build_ptr->runtime_policy_size            = sizeof(cub::detail::merge_sort::policy_selector);
-  build_ptr->block_sort_kernel_lowered_name = strdup(block_sort_kernel_lowered_name.c_str());
-  build_ptr->partition_kernel_lowered_name  = strdup(partition_kernel_lowered_name.c_str());
-  build_ptr->merge_kernel_lowered_name      = strdup(merge_kernel_lowered_name.c_str());
+  build_ptr->block_sort_kernel_lowered_name = duplicate_c_string(block_sort_kernel_lowered_name);
+  build_ptr->partition_kernel_lowered_name  = duplicate_c_string(partition_kernel_lowered_name);
+  build_ptr->merge_kernel_lowered_name      = duplicate_c_string(merge_kernel_lowered_name);
 
   return CUDA_SUCCESS;
 }
@@ -526,12 +525,12 @@ try
     check(cuLibraryUnload(build_ptr->library));
   }
 
-  free(build_ptr->block_sort_kernel_lowered_name);
-  free(build_ptr->partition_kernel_lowered_name);
-  free(build_ptr->merge_kernel_lowered_name);
-  build_ptr->block_sort_kernel_lowered_name = nullptr;
-  build_ptr->partition_kernel_lowered_name  = nullptr;
-  build_ptr->merge_kernel_lowered_name      = nullptr;
+  for (char* p : {build_ptr->block_sort_kernel_lowered_name,
+                  build_ptr->partition_kernel_lowered_name,
+                  build_ptr->merge_kernel_lowered_name})
+  {
+    delete[] p;
+  }
 
   return CUDA_SUCCESS;
 }

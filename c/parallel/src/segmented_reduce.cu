@@ -267,7 +267,7 @@ static_assert(
   build_ptr->accumulator_size                     = accum_t.size;
   build_ptr->runtime_policy                       = new cub::detail::segmented_reduce::policy_selector{policy_sel};
   build_ptr->runtime_policy_size                  = sizeof(cub::detail::segmented_reduce::policy_selector);
-  build_ptr->segmented_reduce_kernel_lowered_name = strdup(segmented_reduce_kernel_lowered_name.c_str());
+  build_ptr->segmented_reduce_kernel_lowered_name = duplicate_c_string(segmented_reduce_kernel_lowered_name);
 
   return CUDA_SUCCESS;
 }
@@ -437,11 +437,10 @@ try
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  // allocation behind cubin is owned by unique_ptr with delete[] deleter now
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
   std::unique_ptr<cub::detail::segmented_reduce::policy_selector> policy(
     static_cast<cub::detail::segmented_reduce::policy_selector*>(build_ptr->runtime_policy));
-  std::free(build_ptr->segmented_reduce_kernel_lowered_name);
+  std::unique_ptr<char[]> kernel_name(build_ptr->segmented_reduce_kernel_lowered_name);
   if (build_ptr->library != nullptr)
   {
     check(cuLibraryUnload(build_ptr->library));

@@ -388,8 +388,8 @@ static_assert(device_histogram_policy()(detail::current_tuning_arch()) == {4}, "
                                    // it later.
   build_ptr->runtime_policy            = new cub::detail::histogram::policy_selector{policy_sel};
   build_ptr->runtime_policy_size       = sizeof(cub::detail::histogram::policy_selector);
-  build_ptr->init_kernel_lowered_name  = strdup(init_kernel_lowered_name.c_str());
-  build_ptr->sweep_kernel_lowered_name = strdup(sweep_kernel_lowered_name.c_str());
+  build_ptr->init_kernel_lowered_name  = duplicate_c_string(init_kernel_lowered_name);
+  build_ptr->sweep_kernel_lowered_name = duplicate_c_string(sweep_kernel_lowered_name);
 
   return CUDA_SUCCESS;
 }
@@ -641,8 +641,8 @@ try
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
   std::unique_ptr<cub::detail::histogram::policy_selector> policy(
     static_cast<cub::detail::histogram::policy_selector*>(build_ptr->runtime_policy));
-  std::free(build_ptr->init_kernel_lowered_name);
-  std::free(build_ptr->sweep_kernel_lowered_name);
+  std::unique_ptr<char[]> init_name(build_ptr->init_kernel_lowered_name);
+  std::unique_ptr<char[]> sweep_name(build_ptr->sweep_kernel_lowered_name);
   if (build_ptr->library != nullptr)
   {
     check(cuLibraryUnload(build_ptr->library));

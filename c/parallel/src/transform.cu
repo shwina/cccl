@@ -330,9 +330,8 @@ static_assert(device_transform_policy()(detail::current_tuning_arch()) == {9}, "
   build_ptr->cubin                         = (void*) result.data.release();
   build_ptr->cubin_size                    = result.size;
   build_ptr->cache                         = new transform::cache();
-  build_ptr->transform_kernel_lowered_name = strdup(kernel_lowered_name.c_str());
+  build_ptr->transform_kernel_lowered_name = duplicate_c_string(kernel_lowered_name);
 
-  // avoid new and delete which requires the allocated and freed types to match
   build_ptr->runtime_policy      = std::malloc(sizeof(policy_sel));
   build_ptr->runtime_policy_size = sizeof(policy_sel);
   std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
@@ -570,9 +569,8 @@ static_assert(device_transform_policy()(detail::current_tuning_arch()) == {12}, 
   build_ptr->cubin                         = (void*) result.data.release();
   build_ptr->cubin_size                    = result.size;
   build_ptr->cache                         = new transform::cache();
-  build_ptr->transform_kernel_lowered_name = strdup(kernel_lowered_name.c_str());
+  build_ptr->transform_kernel_lowered_name = duplicate_c_string(kernel_lowered_name);
 
-  // avoid new and delete which requires the allocated and freed types to match
   build_ptr->runtime_policy      = std::malloc(sizeof(policy_sel));
   build_ptr->runtime_policy_size = sizeof(policy_sel);
   std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
@@ -710,7 +708,7 @@ try
   using namespace cub::detail::transform;
   std::unique_ptr<char[]> cubin(static_cast<char*>(build_ptr->cubin));
   std::free(build_ptr->runtime_policy);
-  std::free(build_ptr->transform_kernel_lowered_name);
+  std::unique_ptr<char[]> kernel_name(build_ptr->transform_kernel_lowered_name);
   std::unique_ptr<transform::cache> cache(static_cast<transform::cache*>(build_ptr->cache));
   if (build_ptr->library != nullptr)
   {

@@ -18,10 +18,8 @@
 #include <cuda/std/functional> // ::cuda::std::identity
 #include <cuda/std/variant>
 
-#include <cstring> // strdup, free, memcpy
 #include <format>
 #include <memory>
-#include <new> // std::nothrow
 #include <vector>
 
 #include "jit_templates/templates/input_iterator.h"
@@ -340,11 +338,11 @@ static_assert(device_reduce_policy()(detail::current_tuning_arch()) == {7}, "Hos
   build->determinism                            = determinism;
   build->runtime_policy                         = new cub::detail::reduce::policy_selector{policy_sel};
   build->runtime_policy_size                    = sizeof(cub::detail::reduce::policy_selector);
-  build->single_tile_kernel_lowered_name        = strdup(single_tile_kernel_lowered_name.c_str());
-  build->single_tile_second_kernel_lowered_name = strdup(single_tile_second_kernel_lowered_name.c_str());
-  build->reduction_kernel_lowered_name          = strdup(reduction_kernel_lowered_name.c_str());
+  build->single_tile_kernel_lowered_name        = duplicate_c_string(single_tile_kernel_lowered_name);
+  build->single_tile_second_kernel_lowered_name = duplicate_c_string(single_tile_second_kernel_lowered_name);
+  build->reduction_kernel_lowered_name          = duplicate_c_string(reduction_kernel_lowered_name);
   build->nondeterministic_kernel_lowered_name =
-    build_nondeterministic ? strdup(nondeterministic_kernel_lowered_name.c_str()) : nullptr;
+    build_nondeterministic ? duplicate_c_string(nondeterministic_kernel_lowered_name) : nullptr;
 
   return CUDA_SUCCESS;
 }
@@ -554,14 +552,13 @@ try
     check(cuLibraryUnload(build_ptr->library));
   }
 
-  free(build_ptr->single_tile_kernel_lowered_name);
-  free(build_ptr->single_tile_second_kernel_lowered_name);
-  free(build_ptr->reduction_kernel_lowered_name);
-  free(build_ptr->nondeterministic_kernel_lowered_name);
-  build_ptr->single_tile_kernel_lowered_name        = nullptr;
-  build_ptr->single_tile_second_kernel_lowered_name = nullptr;
-  build_ptr->reduction_kernel_lowered_name          = nullptr;
-  build_ptr->nondeterministic_kernel_lowered_name   = nullptr;
+  for (char* p : {build_ptr->single_tile_kernel_lowered_name,
+                  build_ptr->single_tile_second_kernel_lowered_name,
+                  build_ptr->reduction_kernel_lowered_name,
+                  build_ptr->nondeterministic_kernel_lowered_name})
+  {
+    delete[] p;
+  }
 
   return CUDA_SUCCESS;
 }

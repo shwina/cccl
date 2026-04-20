@@ -360,15 +360,15 @@ static_assert(device_radix_sort_policy()(current_tuning_arch()) == {6}, "Host ge
   build_ptr->order                             = sort_order;
   build_ptr->runtime_policy                    = new cub::detail::radix_sort::policy_selector{policy_sel};
   build_ptr->runtime_policy_size               = sizeof(cub::detail::radix_sort::policy_selector);
-  build_ptr->single_tile_kernel_lowered_name   = strdup(single_tile_kernel_lowered_name.c_str());
-  build_ptr->upsweep_kernel_lowered_name       = strdup(upsweep_kernel_lowered_name.c_str());
-  build_ptr->alt_upsweep_kernel_lowered_name   = strdup(alt_upsweep_kernel_lowered_name.c_str());
-  build_ptr->scan_bins_kernel_lowered_name     = strdup(scan_bins_kernel_lowered_name.c_str());
-  build_ptr->downsweep_kernel_lowered_name     = strdup(downsweep_kernel_lowered_name.c_str());
-  build_ptr->alt_downsweep_kernel_lowered_name = strdup(alt_downsweep_kernel_lowered_name.c_str());
-  build_ptr->histogram_kernel_lowered_name     = strdup(histogram_kernel_lowered_name.c_str());
-  build_ptr->exclusive_sum_kernel_lowered_name = strdup(exclusive_sum_kernel_lowered_name.c_str());
-  build_ptr->onesweep_kernel_lowered_name      = strdup(onesweep_kernel_lowered_name.c_str());
+  build_ptr->single_tile_kernel_lowered_name   = duplicate_c_string(single_tile_kernel_lowered_name);
+  build_ptr->upsweep_kernel_lowered_name       = duplicate_c_string(upsweep_kernel_lowered_name);
+  build_ptr->alt_upsweep_kernel_lowered_name   = duplicate_c_string(alt_upsweep_kernel_lowered_name);
+  build_ptr->scan_bins_kernel_lowered_name     = duplicate_c_string(scan_bins_kernel_lowered_name);
+  build_ptr->downsweep_kernel_lowered_name     = duplicate_c_string(downsweep_kernel_lowered_name);
+  build_ptr->alt_downsweep_kernel_lowered_name = duplicate_c_string(alt_downsweep_kernel_lowered_name);
+  build_ptr->histogram_kernel_lowered_name     = duplicate_c_string(histogram_kernel_lowered_name);
+  build_ptr->exclusive_sum_kernel_lowered_name = duplicate_c_string(exclusive_sum_kernel_lowered_name);
+  build_ptr->onesweep_kernel_lowered_name      = duplicate_c_string(onesweep_kernel_lowered_name);
 
   return CUDA_SUCCESS;
 }
@@ -608,15 +608,19 @@ try
   using namespace cub::detail::radix_sort;
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(build_ptr->cubin));
   std::unique_ptr<policy_selector> policy(static_cast<policy_selector*>(build_ptr->runtime_policy));
-  std::free(build_ptr->single_tile_kernel_lowered_name);
-  std::free(build_ptr->upsweep_kernel_lowered_name);
-  std::free(build_ptr->alt_upsweep_kernel_lowered_name);
-  std::free(build_ptr->scan_bins_kernel_lowered_name);
-  std::free(build_ptr->downsweep_kernel_lowered_name);
-  std::free(build_ptr->alt_downsweep_kernel_lowered_name);
-  std::free(build_ptr->histogram_kernel_lowered_name);
-  std::free(build_ptr->exclusive_sum_kernel_lowered_name);
-  std::free(build_ptr->onesweep_kernel_lowered_name);
+  for (char* p :
+       {build_ptr->single_tile_kernel_lowered_name,
+        build_ptr->upsweep_kernel_lowered_name,
+        build_ptr->alt_upsweep_kernel_lowered_name,
+        build_ptr->scan_bins_kernel_lowered_name,
+        build_ptr->downsweep_kernel_lowered_name,
+        build_ptr->alt_downsweep_kernel_lowered_name,
+        build_ptr->histogram_kernel_lowered_name,
+        build_ptr->exclusive_sum_kernel_lowered_name,
+        build_ptr->onesweep_kernel_lowered_name})
+  {
+    delete[] p;
+  }
   if (build_ptr->library != nullptr)
   {
     check(cuLibraryUnload(build_ptr->library));

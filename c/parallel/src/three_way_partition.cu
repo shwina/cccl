@@ -279,8 +279,8 @@ static_assert(
   build_ptr->runtime_policy      = new cub::detail::three_way_partition::policy_selector{policy_sel};
   build_ptr->runtime_policy_size = sizeof(cub::detail::three_way_partition::policy_selector);
   build_ptr->three_way_partition_init_kernel_lowered_name =
-    strdup(three_way_partition_init_kernel_lowered_name.c_str());
-  build_ptr->three_way_partition_kernel_lowered_name = strdup(three_way_partition_kernel_lowered_name.c_str());
+    duplicate_c_string(three_way_partition_init_kernel_lowered_name);
+  build_ptr->three_way_partition_kernel_lowered_name = duplicate_c_string(three_way_partition_kernel_lowered_name);
 
   return CUDA_SUCCESS;
 }
@@ -435,8 +435,8 @@ try
   std::unique_ptr<char[]> cubin(reinterpret_cast<char*>(bld_ptr->cubin));
   std::unique_ptr<cub::detail::three_way_partition::policy_selector> policy(
     static_cast<cub::detail::three_way_partition::policy_selector*>(bld_ptr->runtime_policy));
-  std::free(bld_ptr->three_way_partition_init_kernel_lowered_name);
-  std::free(bld_ptr->three_way_partition_kernel_lowered_name);
+  std::unique_ptr<char[]> init_name(bld_ptr->three_way_partition_init_kernel_lowered_name);
+  std::unique_ptr<char[]> kernel_name(bld_ptr->three_way_partition_kernel_lowered_name);
   if (bld_ptr->library != nullptr)
   {
     check(cuLibraryUnload(bld_ptr->library));
