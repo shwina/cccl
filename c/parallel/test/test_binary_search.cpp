@@ -276,7 +276,7 @@ C2H_TEST("BinarySearch compile/load round-trip", "[binary_search][aot]")
   pointer_t<T> data_ptr(data);
   pointer_t<T> values_ptr(values);
   pointer_t<std::ptrdiff_t> output_ptr(n_values);
-  CUstream null_stream = 0;
+  CUstream null_stream = nullptr;
 
   REQUIRE(CUDA_SUCCESS
           == cccl_device_binary_search(build, data_ptr, n_items, values_ptr, n_values, output_ptr, op, null_stream));

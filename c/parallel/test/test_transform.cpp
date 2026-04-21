@@ -901,7 +901,7 @@ C2H_TEST("Transform compile/load round-trip", "[transform][aot]")
   const std::vector<T> input = generate<T>(n);
   pointer_t<T> input_ptr(input);
   pointer_t<T> output_ptr(n);
-  CUstream null_stream = 0;
+  CUstream null_stream = nullptr;
 
   REQUIRE(CUDA_SUCCESS == cccl_device_unary_transform(build, input_ptr, output_ptr, n, op, null_stream));
 
