@@ -497,7 +497,7 @@ C2H_TEST("Histogram compile/load round-trip", "[histogram][device][aot]")
   pointer_t<T> histogram_ptr(2); // 2 bins
   value_t<T> upper_level_val{T{4}};
   value_t<int> num_levels_val{3}; // 3 level boundaries → 2 bins
-  CUstream null_stream      = 0;
+  CUstream null_stream      = nullptr;
   size_t temp_storage_bytes = 0;
 
   REQUIRE(

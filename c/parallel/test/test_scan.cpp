@@ -904,7 +904,7 @@ C2H_TEST("Scan compile/load round-trip", "[scan][aot]")
   const std::vector<T> input = generate<T>(n);
   pointer_t<T> input_ptr(input);
   pointer_t<T> output_ptr(n);
-  CUstream null_stream      = 0;
+  CUstream null_stream      = nullptr;
   size_t temp_storage_bytes = 0;
 
   REQUIRE(CUDA_SUCCESS

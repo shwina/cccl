@@ -420,7 +420,7 @@ C2H_TEST("RadixSort compile/load round-trip", "[radix_sort][aot]")
   pointer_t<T> keys_out(n);
   pointer_t<T> values_in(n);
   pointer_t<T> values_out(n);
-  CUstream null_stream      = 0;
+  CUstream null_stream      = nullptr;
   size_t temp_storage_bytes = 0;
   int selector              = -1;
 

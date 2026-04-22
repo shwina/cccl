@@ -632,7 +632,7 @@ C2H_TEST("ThreeWayPartition compile/load round-trip", "[three_way_partition][aot
   pointer_t<T> second_out(n);
   pointer_t<T> unselected_out(n);
   pointer_t<int> num_selected_out(2);
-  CUstream null_stream      = 0;
+  CUstream null_stream      = nullptr;
   size_t temp_storage_bytes = 0;
 
   REQUIRE(

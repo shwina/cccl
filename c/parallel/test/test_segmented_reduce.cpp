@@ -1273,7 +1273,7 @@ C2H_TEST("SegmentedReduce compile/load round-trip", "[segmented_reduce][aot]")
   const std::vector<int> end_offsets_host   = {static_cast<int>(n / 2), static_cast<int>(n)};
   pointer_t<int> begin_offsets_ptr(begin_offsets_host);
   pointer_t<int> end_offsets_ptr(end_offsets_host);
-  CUstream null_stream      = 0;
+  CUstream null_stream      = nullptr;
   size_t temp_storage_bytes = 0;
 
   REQUIRE(

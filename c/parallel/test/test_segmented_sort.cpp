@@ -829,7 +829,7 @@ C2H_TEST("SegmentedSort compile/load round-trip", "[segmented_sort][aot]")
   const std::vector<Off> end_offsets_host   = {static_cast<Off>(n / 2), static_cast<Off>(n)};
   pointer_t<Off> begin_offsets_ptr(begin_offsets_host);
   pointer_t<Off> end_offsets_ptr(end_offsets_host);
-  CUstream null_stream      = 0;
+  CUstream null_stream      = nullptr;
   size_t temp_storage_bytes = 0;
   int selector              = -1;
 
