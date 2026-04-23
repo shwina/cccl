@@ -1,10 +1,10 @@
-#include "hostjit/config.hpp"
-
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 
 #include <cuda_runtime.h>
+
+#include <hostjit/config.hpp>
 
 namespace hostjit
 {

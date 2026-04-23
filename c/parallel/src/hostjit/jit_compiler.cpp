@@ -1,10 +1,10 @@
-#include "hostjit/jit_compiler.hpp"
-
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <random>
 #include <sstream>
+
+#include <hostjit/jit_compiler.hpp>
 
 #ifdef _WIN32
 #  include <process.h>

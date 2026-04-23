@@ -3,9 +3,9 @@
 #include <memory>
 #include <string>
 
-#include "hostjit/compiler.hpp"
-#include "hostjit/config.hpp"
-#include "hostjit/loader.hpp"
+#include <hostjit/compiler.hpp>
+#include <hostjit/config.hpp>
+#include <hostjit/loader.hpp>
 
 namespace hostjit
 {

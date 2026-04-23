@@ -1,6 +1,3 @@
-#include "hostjit/compiler.hpp"
-
-#include "hostjit/config.hpp"
 #include <clang/Basic/DiagnosticOptions.h>
 #include <clang/Basic/TargetInfo.h>
 #include <clang/CodeGen/CodeGenAction.h>
@@ -10,6 +7,8 @@
 #include <clang/Frontend/FrontendOptions.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/Lex/PreprocessorOptions.h>
+#include <hostjit/compiler.hpp>
+#include <hostjit/config.hpp>
 #include <lld/Common/Driver.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/IR/LegacyPassManager.h>
