@@ -17,8 +17,8 @@ struct CompilerConfig
   std::vector<std::string> device_bitcode_files; // Paths to .bc files to link into device code
   std::unordered_map<std::string, std::string> macro_definitions; // key=macro name, value=macro value (empty for flag
                                                                   // macros)
-  int sm_version         = 70;
-  int optimization_level = 2;
+  int sm_version         = 75;
+  int optimization_level = 2; // optimization_level 3 caused some issues.
   bool debug             = false;
   bool verbose           = false;
   bool trace_includes    = false; // Show all included headers during compilation (for debugging header search)
