@@ -25,6 +25,7 @@
 #include "jit_templates/templates/operation.h"
 #include "jit_templates/templates/output_iterator.h"
 #include "jit_templates/traits.h"
+#include "util/aot.h"
 #include "util/context.h"
 #include "util/errors.h"
 #include "util/indirect_arg.h"
@@ -313,6 +314,64 @@ catch (const std::exception& exc)
   printf("\nEXCEPTION in cccl_device_three_way_partition_load(): %s\n", exc.what());
   fflush(stdout);
 
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult
+cccl_device_three_way_partition_save_file(const cccl_device_three_way_partition_build_result_t* build, const char* path)
+try
+{
+  AotWriter w(path);
+  w.write_header(CclbTag::three_way_partition);
+  w.write_i32(build->cc);
+  w.write_blob(build->cubin, build->cubin_size);
+  w.write_blob(build->runtime_policy, build->runtime_policy_size);
+  w.write_u32(2);
+  w.write_string(build->three_way_partition_init_kernel_lowered_name);
+  w.write_string(build->three_way_partition_kernel_lowered_name);
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  printf("\nEXCEPTION in cccl_device_three_way_partition_save_file(): %s\n", exc.what());
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult
+cccl_device_three_way_partition_load_file(cccl_device_three_way_partition_build_result_t* build, const char* path)
+try
+{
+  AotReader r(path);
+  CclbTag tag = r.read_tag();
+  if (tag != CclbTag::three_way_partition)
+  {
+    printf("\nERROR in cccl_device_three_way_partition_load_file(): unexpected tag %u\n", static_cast<uint32_t>(tag));
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  *build    = {};
+  build->cc = r.read_i32();
+  {
+    uint64_t sz       = 0;
+    void* tmp_cb      = r.read_blob(&sz);
+    build->cubin_size = sz;
+    char* nb          = new char[static_cast<size_t>(sz)];
+    std::memcpy(nb, tmp_cb, static_cast<size_t>(sz));
+    std::free(tmp_cb);
+    build->cubin = nb;
+  }
+  {
+    uint64_t pol_sz            = 0;
+    build->runtime_policy      = r.read_blob(&pol_sz);
+    build->runtime_policy_size = static_cast<size_t>(pol_sz);
+  }
+  (void) r.read_u32(); // nkernels
+  build->three_way_partition_init_kernel_lowered_name = r.read_string_heap();
+  build->three_way_partition_kernel_lowered_name      = r.read_string_heap();
+  return cccl_device_three_way_partition_load(build);
+}
+catch (const std::exception& exc)
+{
+  printf("\nEXCEPTION in cccl_device_three_way_partition_load_file(): %s\n", exc.what());
   return CUDA_ERROR_UNKNOWN;
 }
 

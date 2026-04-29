@@ -19,6 +19,7 @@
 
 #include "kernels/iterators.h"
 #include "kernels/operators.h"
+#include "util/aot.h"
 #include "util/context.h"
 #include "util/errors.h"
 #include "util/indirect_arg.h"
@@ -375,6 +376,75 @@ catch (const std::exception& exc)
   printf("\nEXCEPTION in cccl_device_merge_sort_load(): %s\n", exc.what());
   fflush(stdout);
 
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_merge_sort_save_file(const cccl_device_merge_sort_build_result_t* build, const char* path)
+try
+{
+  if (build->cubin == nullptr)
+  {
+    printf("\nERROR in cccl_device_merge_sort_save_file(): build has no cubin\n");
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  AotWriter w(path);
+  w.write_header(CclbTag::merge_sort);
+  w.write_i32(build->cc);
+  w.write_blob(build->cubin, build->cubin_size);
+  w.write_blob(build->runtime_policy, build->runtime_policy_size);
+  w.write_u32(3);
+  w.write_string(build->block_sort_kernel_lowered_name);
+  w.write_string(build->partition_kernel_lowered_name);
+  w.write_string(build->merge_kernel_lowered_name);
+  w.write_type_info(build->key_type);
+  w.write_type_info(build->item_type);
+  return CUDA_SUCCESS;
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_merge_sort_load_file(cccl_device_merge_sort_build_result_t* build, const char* path)
+try
+{
+  AotReader r(path);
+  CclbTag tag = r.read_tag();
+
+  if (tag != CclbTag::merge_sort)
+  {
+    printf("\nERROR in cccl_device_merge_sort_load_file(): unexpected tag %u\n", static_cast<uint32_t>(tag));
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
+  *build    = {};
+  build->cc = r.read_i32();
+
+  {
+    uint64_t sz       = 0;
+    void* tmp_cb      = r.read_blob(&sz);
+    build->cubin_size = sz;
+    char* nb          = new char[static_cast<size_t>(sz)];
+    std::memcpy(nb, tmp_cb, static_cast<size_t>(sz));
+    std::free(tmp_cb);
+    build->cubin = nb;
+  }
+
+  {
+    uint64_t pol_sz            = 0;
+    build->runtime_policy      = r.read_blob(&pol_sz);
+    build->runtime_policy_size = static_cast<size_t>(pol_sz);
+  }
+  (void) r.read_u32(); // nkernels
+  build->block_sort_kernel_lowered_name = r.read_string_heap();
+  build->partition_kernel_lowered_name  = r.read_string_heap();
+  build->merge_kernel_lowered_name      = r.read_string_heap();
+  build->key_type                       = r.read_type_info();
+  build->item_type                      = r.read_type_info();
+  return cccl_device_merge_sort_load(build);
+}
+catch (...)
+{
   return CUDA_ERROR_UNKNOWN;
 }
 

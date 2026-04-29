@@ -152,5 +152,11 @@ CCCL_C_API CUresult cccl_device_inclusive_scan_no_init(
 
 CCCL_C_API CUresult cccl_device_scan_cleanup(cccl_device_scan_build_result_t* bld_ptr);
 
+// Serialize a compiled build result to a file.
+CCCL_C_API CUresult cccl_device_scan_save_file(const cccl_device_scan_build_result_t* build, const char* path);
+
+// Load a serialized build result from a file, then call cccl_device_scan_load().
+CCCL_C_API CUresult cccl_device_scan_load_file(cccl_device_scan_build_result_t* build, const char* path);
+
 CCCL_C_EXTERN_C_END
 // NOLINTEND(modernize-use-using)

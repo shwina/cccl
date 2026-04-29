@@ -175,5 +175,12 @@ typedef enum cccl_binary_search_mode_t
   CCCL_BINARY_SEARCH_UPPER_BOUND = 1,
 } cccl_binary_search_mode_t;
 
+typedef enum cccl_ltoir_input_type
+{
+  CCCL_LTOIR_INPUT_LTOIR  = 0, // Raw LTO-IR blob
+  CCCL_LTOIR_INPUT_OBJECT = 1, // Relocatable object (nvcc -dc -dlto output)
+  CCCL_LTOIR_INPUT_FATBIN = 2, // Fatbin container
+} cccl_ltoir_input_type;
+
 CCCL_C_EXTERN_C_END
 // NOLINTEND(modernize-use-using)

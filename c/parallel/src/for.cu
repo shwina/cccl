@@ -21,6 +21,7 @@
 #include <for/for_op_helper.h>
 #include <nvrtc/command_list.h>
 #include <nvrtc/ltoir_list_appender.h>
+#include <util/aot.h>
 #include <util/build_utils.h>
 #include <util/context.h>
 #include <util/errors.h>
@@ -241,6 +242,55 @@ try
   }
 
   return CUDA_SUCCESS;
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_for_save_file(const cccl_device_for_build_result_t* build, const char* path)
+try
+{
+  AotWriter w(path);
+  if (build->cubin == nullptr)
+  {
+    printf("\nERROR: cccl_device_for_save_file: build result has no cubin (was cccl_device_for_compile called?)\n");
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  w.write_header(CclbTag::for_each);
+  w.write_i32(build->cc);
+  w.write_blob(build->cubin, build->cubin_size);
+  w.write_u32(1);
+  w.write_string(build->static_kernel_lowered_name);
+  return CUDA_SUCCESS;
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_for_load_file(cccl_device_for_build_result_t* build, const char* path)
+try
+{
+  AotReader r(path);
+  CclbTag tag = r.read_tag();
+  if (tag != CclbTag::for_each)
+  {
+    printf("\nERROR: cccl_device_for_load_file: file tag mismatch\n");
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  build->cc         = r.read_i32();
+  build->cubin      = r.read_blob(&build->cubin_size);
+  uint32_t nkernels = r.read_u32();
+  if (nkernels != 1)
+  {
+    printf("\nERROR: cccl_device_for_load_file: expected 1 kernel, got %u\n", nkernels);
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  build->static_kernel_lowered_name = r.read_string_heap();
+  build->library                    = nullptr;
+  build->static_kernel              = nullptr;
+  return cccl_device_for_load(build);
 }
 catch (...)
 {

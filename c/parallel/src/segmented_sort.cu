@@ -25,6 +25,7 @@
 #include "jit_templates/templates/operation.h"
 #include "jit_templates/templates/output_iterator.h"
 #include "jit_templates/traits.h"
+#include "util/aot.h"
 #include "util/context.h"
 #include "util/errors.h"
 #include "util/indirect_arg.h"
@@ -696,6 +697,102 @@ catch (const std::exception& exc)
   printf("\nEXCEPTION in cccl_device_segmented_sort_load(): %s\n", exc.what());
   fflush(stdout);
 
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_segmented_sort_save_file(const cccl_device_segmented_sort_build_result_t* build, const char* path)
+try
+{
+  AotWriter w(path);
+  w.write_header(CclbTag::segmented_sort);
+  w.write_i32(build->cc);
+  w.write_blob(build->cubin, build->cubin_size);
+  w.write_blob(build->runtime_policy, build->runtime_policy_size);
+  w.write_blob(build->partition_runtime_policy, build->partition_runtime_policy_size);
+  w.write_u32(5);
+  w.write_string(build->segmented_sort_fallback_kernel_lowered_name);
+  w.write_string(build->segmented_sort_kernel_small_lowered_name);
+  w.write_string(build->segmented_sort_kernel_large_lowered_name);
+  w.write_string(build->three_way_partition_init_kernel_lowered_name);
+  w.write_string(build->three_way_partition_kernel_lowered_name);
+  // Selector ops: save type/size/alignment only (state and code are not serialized)
+  w.write_i32(static_cast<int32_t>(build->large_segments_selector_op.type));
+  w.write_u64(static_cast<uint64_t>(build->large_segments_selector_op.size));
+  w.write_u64(static_cast<uint64_t>(build->large_segments_selector_op.alignment));
+  w.write_i32(static_cast<int32_t>(build->small_segments_selector_op.type));
+  w.write_u64(static_cast<uint64_t>(build->small_segments_selector_op.size));
+  w.write_u64(static_cast<uint64_t>(build->small_segments_selector_op.alignment));
+  w.write_type_info(build->key_type);
+  w.write_type_info(build->offset_type);
+  w.write_i32(static_cast<int32_t>(build->order));
+  return CUDA_SUCCESS;
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_segmented_sort_load_file(cccl_device_segmented_sort_build_result_t* build, const char* path)
+try
+{
+  AotReader r(path);
+  CclbTag tag = r.read_tag();
+  if (tag != CclbTag::segmented_sort)
+  {
+    printf("\nERROR in cccl_device_segmented_sort_load_file(): unexpected tag %u\n", static_cast<uint32_t>(tag));
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  *build    = {};
+  build->cc = r.read_i32();
+  {
+    uint64_t sz       = 0;
+    void* tmp_cb      = r.read_blob(&sz);
+    build->cubin_size = sz;
+    char* nb          = new char[static_cast<size_t>(sz)];
+    std::memcpy(nb, tmp_cb, static_cast<size_t>(sz));
+    std::free(tmp_cb);
+    build->cubin = nb;
+  }
+  {
+    uint64_t pol_sz            = 0;
+    build->runtime_policy      = r.read_blob(&pol_sz);
+    build->runtime_policy_size = static_cast<size_t>(pol_sz);
+  }
+  {
+    uint64_t pol_sz                      = 0;
+    build->partition_runtime_policy      = r.read_blob(&pol_sz);
+    build->partition_runtime_policy_size = static_cast<size_t>(pol_sz);
+  }
+  (void) r.read_u32(); // nkernels
+  build->segmented_sort_fallback_kernel_lowered_name  = r.read_string_heap();
+  build->segmented_sort_kernel_small_lowered_name     = r.read_string_heap();
+  build->segmented_sort_kernel_large_lowered_name     = r.read_string_heap();
+  build->three_way_partition_init_kernel_lowered_name = r.read_string_heap();
+  build->three_way_partition_kernel_lowered_name      = r.read_string_heap();
+  // Reconstruct selector ops with zeroed state (no code/state round-trip)
+  build->large_segments_selector_op           = {};
+  build->large_segments_selector_op.type      = static_cast<cccl_op_kind_t>(r.read_i32());
+  build->large_segments_selector_op.size      = static_cast<size_t>(r.read_u64());
+  build->large_segments_selector_op.alignment = static_cast<size_t>(r.read_u64());
+  if (build->large_segments_selector_op.size > 0)
+  {
+    build->large_segments_selector_op.state = std::calloc(1, build->large_segments_selector_op.size);
+  }
+  build->small_segments_selector_op           = {};
+  build->small_segments_selector_op.type      = static_cast<cccl_op_kind_t>(r.read_i32());
+  build->small_segments_selector_op.size      = static_cast<size_t>(r.read_u64());
+  build->small_segments_selector_op.alignment = static_cast<size_t>(r.read_u64());
+  if (build->small_segments_selector_op.size > 0)
+  {
+    build->small_segments_selector_op.state = std::calloc(1, build->small_segments_selector_op.size);
+  }
+  build->key_type    = r.read_type_info();
+  build->offset_type = r.read_type_info();
+  build->order       = static_cast<cccl_sort_order_t>(r.read_i32());
+  return cccl_device_segmented_sort_load(build);
+}
+catch (...)
+{
   return CUDA_ERROR_UNKNOWN;
 }
 

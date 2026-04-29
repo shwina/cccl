@@ -17,6 +17,7 @@
 #include <sstream>
 #include <vector>
 
+#include "util/aot.h"
 #include <cccl/c/unique_by_key.h>
 #include <kernels/iterators.h>
 #include <kernels/operators.h>
@@ -401,6 +402,73 @@ catch (const std::exception& exc)
   printf("\nEXCEPTION in cccl_device_unique_by_key_load(): %s\n", exc.what());
   fflush(stdout);
 
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_unique_by_key_save_file(const cccl_device_unique_by_key_build_result_t* build, const char* path)
+try
+{
+  if (build->cubin == nullptr)
+  {
+    printf("\nERROR in cccl_device_unique_by_key_save_file(): build has no cubin\n");
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  AotWriter w(path);
+  w.write_header(CclbTag::unique_by_key);
+  w.write_i32(build->cc);
+  w.write_blob(build->cubin, build->cubin_size);
+  w.write_blob(build->runtime_policy, build->runtime_policy_size);
+  w.write_u32(2);
+  w.write_string(build->compact_init_kernel_lowered_name);
+  w.write_string(build->sweep_kernel_lowered_name);
+  w.write_u64(static_cast<uint64_t>(build->description_bytes_per_tile));
+  w.write_u64(static_cast<uint64_t>(build->payload_bytes_per_tile));
+  return CUDA_SUCCESS;
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_unique_by_key_load_file(cccl_device_unique_by_key_build_result_t* build, const char* path)
+try
+{
+  AotReader r(path);
+  CclbTag tag = r.read_tag();
+
+  if (tag != CclbTag::unique_by_key)
+  {
+    printf("\nERROR in cccl_device_unique_by_key_load_file(): unexpected tag %u\n", static_cast<uint32_t>(tag));
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
+  *build    = {};
+  build->cc = r.read_i32();
+
+  {
+    uint64_t sz       = 0;
+    void* tmp_cb      = r.read_blob(&sz);
+    build->cubin_size = sz;
+    char* nb          = new char[static_cast<size_t>(sz)];
+    std::memcpy(nb, tmp_cb, static_cast<size_t>(sz));
+    std::free(tmp_cb);
+    build->cubin = nb;
+  }
+
+  {
+    uint64_t pol_sz            = 0;
+    build->runtime_policy      = r.read_blob(&pol_sz);
+    build->runtime_policy_size = static_cast<size_t>(pol_sz);
+  }
+  (void) r.read_u32(); // nkernels
+  build->compact_init_kernel_lowered_name = r.read_string_heap();
+  build->sweep_kernel_lowered_name        = r.read_string_heap();
+  build->description_bytes_per_tile       = static_cast<size_t>(r.read_u64());
+  build->payload_bytes_per_tile           = static_cast<size_t>(r.read_u64());
+  return cccl_device_unique_by_key_load(build);
+}
+catch (...)
+{
   return CUDA_ERROR_UNKNOWN;
 }
 

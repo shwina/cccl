@@ -27,6 +27,7 @@
 
 #include <nvrtc.h>
 
+#include "util/aot.h"
 #include <cccl/c/scan.h>
 #include <kernels/iterators.h>
 #include <kernels/operators.h>
@@ -607,6 +608,83 @@ CUresult cccl_device_inclusive_scan_no_init(
   assert(build.init_kind == cccl_init_kind_t::CCCL_NO_INIT);
   return cccl_device_scan<cub::ForceInclusive::Yes, cub::NullType>(
     build, d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, op, cub::NullType{}, stream);
+}
+
+CUresult cccl_device_scan_save_file(const cccl_device_scan_build_result_t* build, const char* path)
+try
+{
+  AotWriter w(path);
+  if (build->cubin == nullptr)
+  {
+    printf("\nERROR in cccl_device_scan_save_file(): build has no cubin\n");
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  w.write_header(CclbTag::scan);
+  w.write_i32(build->cc);
+  w.write_blob(build->cubin, build->cubin_size);
+  w.write_blob(build->runtime_policy, build->runtime_policy_size);
+  w.write_u32(2);
+  w.write_string(build->init_kernel_lowered_name);
+  w.write_string(build->scan_kernel_lowered_name);
+  w.write_type_info(build->input_type);
+  w.write_type_info(build->output_type);
+  w.write_type_info(build->accumulator_type);
+  w.write_bool(build->force_inclusive);
+  w.write_i32(static_cast<int32_t>(build->init_kind));
+  w.write_u64(static_cast<uint64_t>(build->description_bytes_per_tile));
+  w.write_u64(static_cast<uint64_t>(build->payload_bytes_per_tile));
+  return CUDA_SUCCESS;
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_scan_load_file(cccl_device_scan_build_result_t* build, const char* path)
+try
+{
+  AotReader r(path);
+  CclbTag tag = r.read_tag();
+
+  *build    = {};
+  build->cc = r.read_i32();
+
+  if (tag != CclbTag::scan)
+  {
+    printf("\nERROR in cccl_device_scan_load_file(): unexpected tag %u\n", static_cast<uint32_t>(tag));
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
+  {
+    uint64_t sz       = 0;
+    void* tmp_cb      = r.read_blob(&sz);
+    build->cubin_size = sz;
+    char* nb          = new char[static_cast<size_t>(sz)];
+    std::memcpy(nb, tmp_cb, static_cast<size_t>(sz));
+    std::free(tmp_cb);
+    build->cubin = nb;
+  }
+
+  {
+    uint64_t pol_sz            = 0;
+    build->runtime_policy      = r.read_blob(&pol_sz);
+    build->runtime_policy_size = static_cast<size_t>(pol_sz);
+  }
+  (void) r.read_u32(); // nkernels
+  build->init_kernel_lowered_name   = r.read_string_heap();
+  build->scan_kernel_lowered_name   = r.read_string_heap();
+  build->input_type                 = r.read_type_info();
+  build->output_type                = r.read_type_info();
+  build->accumulator_type           = r.read_type_info();
+  build->force_inclusive            = r.read_bool();
+  build->init_kind                  = static_cast<cccl_init_kind_t>(r.read_i32());
+  build->description_bytes_per_tile = static_cast<size_t>(r.read_u64());
+  build->payload_bytes_per_tile     = static_cast<size_t>(r.read_u64());
+  return cccl_device_scan_load(build);
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
 }
 
 CUresult cccl_device_scan_build_ex(

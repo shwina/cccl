@@ -26,6 +26,7 @@
 #include "jit_templates/templates/operation.h"
 #include "jit_templates/templates/output_iterator.h"
 #include "jit_templates/traits.h"
+#include "util/aot.h"
 #include "util/context.h"
 #include "util/errors.h"
 #include "util/indirect_arg.h"
@@ -380,6 +381,77 @@ catch (const std::exception& exc)
   printf("\nEXCEPTION in cccl_device_reduce_load(): %s\n", exc.what());
   fflush(stdout);
 
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_reduce_save_file(const cccl_device_reduce_build_result_t* build, const char* path)
+try
+{
+  AotWriter w(path);
+  if (build->cubin == nullptr)
+  {
+    printf("\nERROR in cccl_device_reduce_save_file(): build has no cubin\n");
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  w.write_header(CclbTag::reduce);
+  w.write_i32(build->cc);
+  w.write_blob(build->cubin, build->cubin_size);
+  w.write_blob(build->runtime_policy, build->runtime_policy_size);
+  w.write_u32(4);
+  w.write_string(build->single_tile_kernel_lowered_name);
+  w.write_string(build->single_tile_second_kernel_lowered_name);
+  w.write_string(build->reduction_kernel_lowered_name);
+  w.write_string(build->nondeterministic_kernel_lowered_name);
+  w.write_u64(build->accumulator_size);
+  w.write_i32(static_cast<int32_t>(build->determinism));
+  return CUDA_SUCCESS;
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_reduce_load_file(cccl_device_reduce_build_result_t* build, const char* path)
+try
+{
+  AotReader r(path);
+  CclbTag tag = r.read_tag();
+
+  *build    = {};
+  build->cc = r.read_i32();
+
+  if (tag != CclbTag::reduce)
+  {
+    printf("\nERROR in cccl_device_reduce_load_file(): unexpected tag %u\n", static_cast<uint32_t>(tag));
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
+  {
+    uint64_t sz       = 0;
+    void* tmp_cb      = r.read_blob(&sz);
+    build->cubin_size = sz;
+    char* nb          = new char[static_cast<size_t>(sz)];
+    std::memcpy(nb, tmp_cb, static_cast<size_t>(sz));
+    std::free(tmp_cb);
+    build->cubin = nb;
+  }
+
+  {
+    uint64_t pol_sz            = 0;
+    build->runtime_policy      = r.read_blob(&pol_sz);
+    build->runtime_policy_size = static_cast<size_t>(pol_sz);
+  }
+  (void) r.read_u32(); // nkernels
+  build->single_tile_kernel_lowered_name        = r.read_string_heap();
+  build->single_tile_second_kernel_lowered_name = r.read_string_heap();
+  build->reduction_kernel_lowered_name          = r.read_string_heap();
+  build->nondeterministic_kernel_lowered_name   = r.read_string_heap();
+  build->accumulator_size                       = r.read_u64();
+  build->determinism                            = static_cast<cccl_determinism_t>(r.read_i32());
+  return cccl_device_reduce_load(build);
+}
+catch (...)
+{
   return CUDA_ERROR_UNKNOWN;
 }
 

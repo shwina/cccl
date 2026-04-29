@@ -18,6 +18,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "util/aot.h"
 #include <cccl/c/binary_search.h>
 #include <cccl/c/transform.h>
 #include <cccl/c/types.h>
@@ -405,6 +406,55 @@ try
   }
 
   return cccl_device_transform_cleanup(&build_ptr->transform);
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_binary_search_save_file(const cccl_device_binary_search_build_result_t* build, const char* path)
+try
+{
+  if (build->cubin == nullptr)
+  {
+    printf("\nERROR in cccl_device_binary_search_save_file(): build has no cubin\n");
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  AotWriter w(path);
+  w.write_header(CclbTag::binary_search);
+  w.write_i32(build->cc);
+  w.write_blob(build->cubin, build->cubin_size);
+  w.write_u32(1);
+  w.write_string(build->kernel_lowered_name);
+  return CUDA_SUCCESS;
+}
+catch (...)
+{
+  return CUDA_ERROR_UNKNOWN;
+}
+
+CUresult cccl_device_binary_search_load_file(cccl_device_binary_search_build_result_t* build, const char* path)
+try
+{
+  AotReader r(path);
+  CclbTag tag = r.read_tag();
+  if (tag != CclbTag::binary_search)
+  {
+    printf("\nERROR in cccl_device_binary_search_load_file(): unexpected tag %u\n", static_cast<uint32_t>(tag));
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  build->cc         = r.read_i32();
+  build->cubin      = r.read_blob(&build->cubin_size);
+  uint32_t nkernels = r.read_u32();
+  if (nkernels != 1)
+  {
+    printf("\nERROR in cccl_device_binary_search_load_file(): expected 1 kernel, got %u\n", nkernels);
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+  build->kernel_lowered_name = r.read_string_heap();
+  build->library             = nullptr;
+  build->kernel              = nullptr;
+  return cccl_device_binary_search_load(build);
 }
 catch (...)
 {
