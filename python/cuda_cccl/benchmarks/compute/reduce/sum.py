@@ -39,9 +39,11 @@ def bench_reduce_sum(state: bench.State):
     # Initial value for reduction
     h_init = np.zeros(1, dtype=dtype)
 
-    reducer = make_reduce_into(d_in, d_out, OpKind.PLUS, h_init)
+    reducer = make_reduce_into(d_in=d_in, d_out=d_out, op=OpKind.PLUS, h_init=h_init)
 
-    temp_storage_bytes = reducer(None, d_in, d_out, OpKind.PLUS, num_items, h_init)
+    temp_storage_bytes = reducer(
+        None, d_in=d_in, d_out=d_out, num_items=num_items, op=OpKind.PLUS, h_init=h_init
+    )
     with alloc_stream:
         temp_storage = cp.empty(temp_storage_bytes, dtype=np.uint8)
 
@@ -52,12 +54,12 @@ def bench_reduce_sum(state: bench.State):
     def launcher(launch: bench.Launch):
         reducer(
             temp_storage,
-            d_in,
-            d_out,
-            OpKind.PLUS,
-            num_items,
-            h_init,
-            launch.get_stream(),
+            d_in=d_in,
+            d_out=d_out,
+            num_items=num_items,
+            op=OpKind.PLUS,
+            h_init=h_init,
+            stream=launch.get_stream(),
         )
 
     state.exec(launcher, batched=False)

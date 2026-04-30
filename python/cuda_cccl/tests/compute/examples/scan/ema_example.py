@@ -65,7 +65,9 @@ d_inp = ZipIterator(u, negative_exponents_it)
 d_cumsum = cp.empty(u.shape, dtype=ValueScale.dtype)
 h_init = ValueScale(0.0, 0)
 
-cuda.compute.inclusive_scan(d_inp, d_cumsum, add_op, h_init, u.size)
+cuda.compute.inclusive_scan(
+    d_in=d_inp, d_out=d_cumsum, op=add_op, init_value=h_init, num_items=u.size
+)
 
 it_seq = CountingIterator(cp.int64(0))
 d_ema = cp.empty_like(u)

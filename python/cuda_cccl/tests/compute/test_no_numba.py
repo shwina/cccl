@@ -25,7 +25,9 @@ def test_reduce_op_kind():
     d_output = cp.empty(1, dtype=np.int32)
 
     h_init = np.array(0, dtype=np.int32)
-    cuda.compute.reduce_into(d_input, d_output, OpKind.PLUS, num_items, h_init)
+    cuda.compute.reduce_into(
+        d_in=d_input, d_out=d_output, num_items=num_items, op=OpKind.PLUS, h_init=h_init
+    )
 
     result = d_output.get()[0]
     expected = np.sum(h_input)
@@ -60,15 +62,15 @@ def test_segmented_sort_op_kind():
     num_segments = len(h_offsets) - 1
 
     cuda.compute.segmented_sort(
-        d_keys_in,
-        d_keys_out,
-        None,
-        None,
-        num_items,
-        num_segments,
-        d_offsets[:-1],
-        d_offsets[1:],
-        cuda.compute.SortOrder.ASCENDING,
+        d_in_keys=d_keys_in,
+        d_out_keys=d_keys_out,
+        d_in_values=None,
+        d_out_values=None,
+        num_items=num_items,
+        num_segments=num_segments,
+        start_offsets_in=d_offsets[:-1],
+        end_offsets_in=d_offsets[1:],
+        order=cuda.compute.SortOrder.ASCENDING,
     )
 
     result = d_keys_out.get()
