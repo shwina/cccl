@@ -365,7 +365,7 @@ def test_merge_sort_large_temp_storage_not_negative():
     )
 
     temp_storage_bytes = sorter(
-        None,
+        temp_storage=None,
         d_in_keys=d_in_keys,
         d_in_values=None,
         d_out_keys=d_out_keys,

@@ -65,8 +65,8 @@ class _SegmentedSort:
 
     def __call__(
         self,
-        temp_storage,
         *,
+        temp_storage,
         d_in_keys,
         d_out_keys,
         d_in_values,
@@ -231,7 +231,7 @@ def segmented_sort(
         order=order,
     )
     tmp_storage_bytes = sorter(
-        None,
+        temp_storage=None,
         d_in_keys=d_in_keys,
         d_out_keys=d_out_keys,
         d_in_values=d_in_values,
@@ -244,7 +244,7 @@ def segmented_sort(
     )
     tmp_storage = TempStorageBuffer(tmp_storage_bytes, stream)
     sorter(
-        tmp_storage,
+        temp_storage=tmp_storage,
         d_in_keys=d_in_keys,
         d_out_keys=d_out_keys,
         d_in_values=d_in_values,

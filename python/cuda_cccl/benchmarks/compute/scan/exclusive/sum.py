@@ -46,7 +46,7 @@ def bench_scan_exclusive_sum(state: bench.State):
     )
 
     temp_storage_bytes = scanner(
-        None,
+        temp_storage=None,
         d_in=d_in,
         d_out=d_out,
         op=OpKind.PLUS,
@@ -62,7 +62,7 @@ def bench_scan_exclusive_sum(state: bench.State):
 
     def launcher(launch: bench.Launch):
         scanner(
-            temp_storage,
+            temp_storage=temp_storage,
             d_in=d_in,
             d_out=d_out,
             op=OpKind.PLUS,

@@ -116,8 +116,8 @@ class _Scan:
 
     def __call__(
         self,
-        temp_storage,
         *,
+        temp_storage,
         d_in,
         d_out,
         op: Callable | OpAdapter,
@@ -239,7 +239,7 @@ def exclusive_scan(
     """
     scanner = make_exclusive_scan(d_in=d_in, d_out=d_out, op=op, init_value=init_value)
     tmp_storage_bytes = scanner(
-        None,
+        temp_storage=None,
         d_in=d_in,
         d_out=d_out,
         op=op,
@@ -249,7 +249,7 @@ def exclusive_scan(
     )
     tmp_storage = TempStorageBuffer(tmp_storage_bytes, stream)
     scanner(
-        tmp_storage,
+        temp_storage=tmp_storage,
         d_in=d_in,
         d_out=d_out,
         op=op,
@@ -328,7 +328,7 @@ def inclusive_scan(
     """
     scanner = make_inclusive_scan(d_in=d_in, d_out=d_out, op=op, init_value=init_value)
     tmp_storage_bytes = scanner(
-        None,
+        temp_storage=None,
         d_in=d_in,
         d_out=d_out,
         op=op,
@@ -338,7 +338,7 @@ def inclusive_scan(
     )
     tmp_storage = TempStorageBuffer(tmp_storage_bytes, stream)
     scanner(
-        tmp_storage,
+        temp_storage=tmp_storage,
         d_in=d_in,
         d_out=d_out,
         op=op,

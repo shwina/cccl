@@ -27,7 +27,7 @@ scanner = cuda.compute.make_inclusive_scan(
     d_in=d_input, d_out=d_output, op=OpKind.PLUS, init_value=h_init
 )
 temp_storage_size = scanner(
-    None,
+    temp_storage=None,
     d_in=d_input,
     d_out=d_output,
     op=OpKind.PLUS,
@@ -38,7 +38,7 @@ d_temp_storage = cp.empty(temp_storage_size, dtype=np.uint8)
 
 # Perform the inclusive scan.
 scanner(
-    d_temp_storage,
+    temp_storage=d_temp_storage,
     d_in=d_input,
     d_out=d_output,
     op=OpKind.PLUS,

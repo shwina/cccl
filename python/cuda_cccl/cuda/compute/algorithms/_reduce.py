@@ -71,8 +71,8 @@ class _Reduce:
 
     def __call__(
         self,
-        temp_storage,
         *,
+        temp_storage,
         d_in,
         d_out,
         num_items: int,
@@ -185,7 +185,7 @@ def reduce_into(
     """
     reducer = make_reduce_into(d_in=d_in, d_out=d_out, op=op, h_init=h_init, **kwargs)
     tmp_storage_bytes = reducer(
-        None,
+        temp_storage=None,
         d_in=d_in,
         d_out=d_out,
         num_items=num_items,
@@ -195,7 +195,7 @@ def reduce_into(
     )
     tmp_storage = TempStorageBuffer(tmp_storage_bytes, stream)
     reducer(
-        tmp_storage,
+        temp_storage=tmp_storage,
         d_in=d_in,
         d_out=d_out,
         num_items=num_items,

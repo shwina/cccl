@@ -70,8 +70,8 @@ class _SegmentedReduce:
 
     def __call__(
         self,
-        temp_storage,
         *,
+        temp_storage,
         d_in,
         d_out,
         num_segments: int,
@@ -213,7 +213,7 @@ def segmented_reduce(
         h_init=h_init,
     )
     tmp_storage_bytes = reducer(
-        None,
+        temp_storage=None,
         d_in=d_in,
         d_out=d_out,
         num_segments=num_segments,
@@ -226,7 +226,7 @@ def segmented_reduce(
     )
     tmp_storage = TempStorageBuffer(tmp_storage_bytes, stream)
     reducer(
-        tmp_storage,
+        temp_storage=tmp_storage,
         d_in=d_in,
         d_out=d_out,
         num_segments=num_segments,

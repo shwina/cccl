@@ -656,7 +656,7 @@ def test_reduce_invalid_stream():
         TypeError, match="does not implement the '__cuda_stream__' protocol"
     ):
         _ = reduce_into(
-            None,
+            temp_storage=None,
             d_in=d_in,
             d_out=d_out,
             op=add_op,
@@ -669,7 +669,7 @@ def test_reduce_invalid_stream():
         TypeError, match="could not obtain __cuda_stream__ protocol version and handle"
     ):
         _ = reduce_into(
-            None,
+            temp_storage=None,
             d_in=d_in,
             d_out=d_out,
             op=add_op,
@@ -680,7 +680,7 @@ def test_reduce_invalid_stream():
 
     with pytest.raises(TypeError, match="invalid stream handle"):
         _ = reduce_into(
-            None,
+            temp_storage=None,
             d_in=d_in,
             d_out=d_out,
             op=add_op,

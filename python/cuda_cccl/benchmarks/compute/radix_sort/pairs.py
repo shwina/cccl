@@ -66,7 +66,7 @@ def bench_radix_sort_pairs(state: bench.State):
     )
 
     temp_storage_bytes = sorter(
-        None,
+        temp_storage=None,
         d_in_keys=d_in_keys,
         d_out_keys=d_out_keys,
         d_in_values=d_in_values,
@@ -84,7 +84,7 @@ def bench_radix_sort_pairs(state: bench.State):
 
     def launcher(launch: bench.Launch):
         sorter(
-            temp_storage,
+            temp_storage=temp_storage,
             d_in_keys=d_in_keys,
             d_out_keys=d_out_keys,
             d_in_values=d_in_values,

@@ -47,7 +47,7 @@ def bench_reduce_min(state: bench.State):
     reducer = make_reduce_into(d_in=d_in, d_out=d_out, op=OpKind.MINIMUM, h_init=h_init)
 
     temp_storage_bytes = reducer(
-        None,
+        temp_storage=None,
         d_in=d_in,
         d_out=d_out,
         num_items=num_items,
@@ -63,7 +63,7 @@ def bench_reduce_min(state: bench.State):
 
     def launcher(launch: bench.Launch):
         reducer(
-            temp_storage,
+            temp_storage=temp_storage,
             d_in=d_in,
             d_out=d_out,
             num_items=num_items,

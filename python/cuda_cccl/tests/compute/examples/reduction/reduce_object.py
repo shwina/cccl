@@ -30,7 +30,7 @@ reducer = cuda.compute.make_reduce_into(
 
 # Get the temporary storage size.
 temp_storage_size = reducer(
-    None,
+    temp_storage=None,
     d_in=d_input,
     d_out=d_output,
     num_items=len(h_input),
@@ -44,7 +44,7 @@ d_temp_storage = cp.empty(temp_storage_size, dtype=np.uint8)
 
 # Perform the reduction.
 reducer(
-    d_temp_storage,
+    temp_storage=d_temp_storage,
     d_in=d_input,
     d_out=d_output,
     num_items=len(h_input),
