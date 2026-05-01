@@ -87,7 +87,7 @@ returns a reusable reduction object that lets you manage memory explicitly.
 
    # create a reducer object:
    reducer = cuda.compute.make_reduce_into(d_in=d_in, d_out=d_out, op=op, h_init=h_init)
-   # get the temporary storage size by passing None as the first argument:
+   # get the temporary storage size by passing None for the temp_storage argument:
    temp_storage_bytes = reducer(temp_storage=None, d_in=d_in, d_out=d_out, num_items=num_items, op=op, h_init=h_init)
    # allocate the temporary storage as any array-like object
    # (e.g., CuPy array, Torch tensor):
