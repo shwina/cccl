@@ -47,13 +47,13 @@ class _Select:
 
         # Use three_way_partition internally
         self.partitioner = make_three_way_partition(
-            d_in,
-            d_out,  # first_part_out - this is where selected items go
-            self.discard_second,  # second_part_out - discarded
-            self.discard_unselected,  # unselected_out - discarded
-            d_num_selected_out,
-            cond,  # select_first_part_op - user's select condition
-            self.false_op,  # select_second_part_op - always false
+            d_in=d_in,
+            d_first_part_out=d_out,
+            d_second_part_out=self.discard_second,
+            d_unselected_out=self.discard_unselected,
+            d_num_selected_out=d_num_selected_out,
+            select_first_part_op=cond,
+            select_second_part_op=self.false_op,
         )
 
     def __call__(

@@ -42,7 +42,13 @@ def test_binary_transform_op_kind():
     d_input2 = cp.array(h_input2)
     d_output = cp.empty(num_items, dtype=np.int32)
 
-    cuda.compute.binary_transform(d_input1, d_input2, d_output, OpKind.PLUS, num_items)
+    cuda.compute.binary_transform(
+        d_in1=d_input1,
+        d_in2=d_input2,
+        d_out=d_output,
+        op=OpKind.PLUS,
+        num_items=num_items,
+    )
 
     result = d_output.get()
     expected = h_input1 + h_input2

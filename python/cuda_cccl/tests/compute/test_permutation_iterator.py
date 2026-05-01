@@ -149,7 +149,9 @@ def test_unary_transform_of_permutation_iterator():
         return a + 1
 
     d_out = cp.empty_like(values, shape=(len(indices),))
-    cuda.compute.unary_transform(perm_it, d_out, op, len(indices))
+    cuda.compute.unary_transform(
+        d_in=perm_it, d_out=d_out, op=op, num_items=len(indices)
+    )
 
     expected = values[indices] + 1
     assert cp.all(d_out == expected)

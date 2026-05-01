@@ -199,7 +199,11 @@ def test_zip_iterator_with_transform(num_items):
     d_output = cp.empty(num_items, dtype=TransformedPair.dtype)
 
     cuda.compute.binary_transform(
-        zip_it1, zip_it2, d_output, binary_transform, num_items
+        d_in1=zip_it1,
+        d_in2=zip_it2,
+        d_out=d_output,
+        op=binary_transform,
+        num_items=num_items,
     )
 
     result = d_output.get()
