@@ -501,7 +501,13 @@ def test_cpp_stateful_op_select_with_counter():
     d_num_selected = cp.empty(1, dtype=np.int32)
 
     # Run select
-    cuda.compute.select(d_input, d_output, d_num_selected, op, num_items)
+    cuda.compute.select(
+        d_in=d_input,
+        d_out=d_output,
+        d_num_selected_out=d_num_selected,
+        cond=op,
+        num_items=num_items,
+    )
 
     # Get results
     num_selected = d_num_selected.get()[0]
