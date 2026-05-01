@@ -237,10 +237,10 @@ def test_select_object_api(dtype):
 
     # Create select object
     selector = cuda.compute.make_select(
-        d_in,
-        d_out,
-        d_num_selected,
-        divisible_by_3,
+        d_in=d_in,
+        d_out=d_out,
+        d_num_selected_out=d_num_selected,
+        cond=divisible_by_3,
     )
 
     # Get temp storage size
@@ -290,10 +290,10 @@ def test_select_reuse_object(dtype):
     h_in1 = random_array(num_items, dtype, max_value=100) - 50
     d_in1 = cp.asarray(h_in1)
     selector = cuda.compute.make_select(
-        d_in1,
-        d_out,
-        d_num_selected,
-        positive_op,
+        d_in=d_in1,
+        d_out=d_out,
+        d_num_selected_out=d_num_selected,
+        cond=positive_op,
     )
 
     # First execution
