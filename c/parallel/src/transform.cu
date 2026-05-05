@@ -329,14 +329,24 @@ static_assert(device_transform_policy()(detail::current_tuning_cc()) == {9}, "Ho
       ->compile_program({args.data(), args.size()})
       ->get_name({kernel_name, kernel_lowered_name});
 
+  struct free_deleter
+  {
+    void operator()(void* p) const
+    {
+      std::free(p);
+    }
+  };
+  std::unique_ptr<void, free_deleter> runtime_policy(std::malloc(sizeof(policy_sel)));
+  std::memcpy(runtime_policy.get(), &policy_sel, sizeof(policy_sel));
+  auto cache_obj        = std::make_unique<transform::cache>();
+  auto kernel_name_copy = std::unique_ptr<char[]>(duplicate_c_string(kernel_lowered_name));
+
   build_ptr->loaded_bytes_per_iteration    = static_cast<int>(input_it.value_type.size);
   build_ptr->cc                            = cc_major * 10 + cc_minor;
-  build_ptr->cache                         = new transform::cache();
-  build_ptr->transform_kernel_lowered_name = duplicate_c_string(kernel_lowered_name);
-
-  build_ptr->runtime_policy      = std::malloc(sizeof(policy_sel));
-  build_ptr->runtime_policy_size = sizeof(policy_sel);
-  std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
+  build_ptr->cache                         = cache_obj.release();
+  build_ptr->transform_kernel_lowered_name = kernel_name_copy.release();
+  build_ptr->runtime_policy                = runtime_policy.release();
+  build_ptr->runtime_policy_size           = sizeof(policy_sel);
 
   if (kernel_only)
   {
@@ -608,14 +618,24 @@ static_assert(device_transform_policy()(detail::current_tuning_cc()) == {12}, "H
       ->compile_program({args.data(), args.size()})
       ->get_name({kernel_name, kernel_lowered_name});
 
+  struct free_deleter
+  {
+    void operator()(void* p) const
+    {
+      std::free(p);
+    }
+  };
+  std::unique_ptr<void, free_deleter> runtime_policy(std::malloc(sizeof(policy_sel)));
+  std::memcpy(runtime_policy.get(), &policy_sel, sizeof(policy_sel));
+  auto cache_obj        = std::make_unique<transform::cache>();
+  auto kernel_name_copy = std::unique_ptr<char[]>(duplicate_c_string(kernel_lowered_name));
+
   build_ptr->loaded_bytes_per_iteration    = static_cast<int>((input1_it.value_type.size + input2_it.value_type.size));
   build_ptr->cc                            = cc_major * 10 + cc_minor;
-  build_ptr->cache                         = new transform::cache();
-  build_ptr->transform_kernel_lowered_name = duplicate_c_string(kernel_lowered_name);
-
-  build_ptr->runtime_policy      = std::malloc(sizeof(policy_sel));
-  build_ptr->runtime_policy_size = sizeof(policy_sel);
-  std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
+  build_ptr->cache                         = cache_obj.release();
+  build_ptr->transform_kernel_lowered_name = kernel_name_copy.release();
+  build_ptr->runtime_policy                = runtime_policy.release();
+  build_ptr->runtime_policy_size           = sizeof(policy_sel);
 
   if (kernel_only)
   {
