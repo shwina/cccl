@@ -434,10 +434,6 @@ CUresult cccl_device_unary_transform_build_ex(
   {
     return r;
   }
-  if (build_ptr->cubin == nullptr)
-  {
-    return CUDA_SUCCESS;
-  }
   return cccl_device_transform_load(build_ptr);
 }
 
@@ -716,10 +712,6 @@ CUresult cccl_device_binary_transform_build_ex(
   if (r != CUDA_SUCCESS)
   {
     return r;
-  }
-  if (build_ptr->cubin == nullptr)
-  {
-    return CUDA_SUCCESS;
   }
   return cccl_device_transform_load(build_ptr);
 }
