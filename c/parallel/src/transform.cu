@@ -411,7 +411,12 @@ CUresult cccl_device_unary_transform_build_ex(
         sizes.push_back(l.size);
       }
     }
-    return cccl_device_transform_link_ltoir(build_ptr, blobs.data(), sizes.data(), blobs.size());
+    CUresult r = cccl_device_transform_link_ltoir(build_ptr, blobs.data(), sizes.data(), blobs.size());
+    if (r != CUDA_SUCCESS)
+    {
+      return r;
+    }
+    return cccl_device_transform_load(build_ptr);
   }
   CUresult r = cccl_device_unary_transform_compile(
     build_ptr, input_it, output_it, op, cc_major, cc_minor, cub_path, thrust_path, libcudacxx_path, ctk_path, config);
@@ -668,7 +673,12 @@ CUresult cccl_device_binary_transform_build_ex(
         sizes.push_back(l.size);
       }
     }
-    return cccl_device_transform_link_ltoir(build_ptr, blobs.data(), sizes.data(), blobs.size());
+    CUresult r = cccl_device_transform_link_ltoir(build_ptr, blobs.data(), sizes.data(), blobs.size());
+    if (r != CUDA_SUCCESS)
+    {
+      return r;
+    }
+    return cccl_device_transform_load(build_ptr);
   }
   CUresult r = cccl_device_binary_transform_compile(
     build_ptr,
@@ -833,7 +843,7 @@ try
   build_ptr->kernel_ltoir_size = 0;
   build_ptr->cubin             = (void*) cubin.release();
   build_ptr->cubin_size        = cubin_size;
-  return cccl_device_transform_load(build_ptr);
+  return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
