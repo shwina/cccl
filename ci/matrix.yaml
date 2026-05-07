@@ -21,8 +21,17 @@ workflows:
   #       args: '--preset libcudacxx --lit-tests "cuda/utility/basic_any.pass.cpp"' }
   #
   override:
-    # Python 3.10 and 3.14 testing on Linux (gcc13) and Windows (msvc2022)
-    - {jobs: ['test'], project: 'python', ctk: '13.X', py_version: ['3.10', '3.14'], gpu: 'l4', cxx: ['gcc13', 'msvc2022']}
+    # Cover everything this PR changes for Python builds. The build path now
+    # always uses a py3.10-tagged ci-wheel image and installs the requested
+    # py_version via uv, so retest 3.10 too. Include configs that wouldn't
+    # normally run in pull_request CI (h100 + msvc2022, arm64 wheels).
+    #
+    # l4: Linux + Windows, all current CTKs, py3.10 + py3.14
+    - {jobs: ['test'], project: 'python', ctk: ['12.X', '13.0', '13.X'], py_version: ['3.10', '3.14'], gpu: 'l4', cxx: ['gcc13', 'msvc2022']}
+    # h100: Linux + Windows on py3.14 (msvc2022 h100 only runs in weekly/python-wheels normally)
+    - {jobs: ['test'], project: 'python', ctk: '13.X', py_version: '3.14', gpu: 'h100', cxx: ['gcc13', 'msvc2022']}
+    # arm64 wheels (Linux/gcc13 only) — only present in python-wheels normally
+    - {jobs: ['test'], project: 'python', cpu: 'arm64', ctk: '13.X', py_version: ['3.10', '3.14'], gpu: 'l4', cxx: 'gcc13'}
 
   pull_request:
     # Old CTK: Oldest/newest supported host compilers:
