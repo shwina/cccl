@@ -1,0 +1,106 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R /F2 8 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 2208 >>
+stream
+BT /F2 18 Tf 0.1 0.3 0.55 rg 50.00 737.00 Td (cuda.compute v2 \(HostJIT\) - Performance Report) Tj ET
+BT /F1 9 Tf 0.45 0.45 0.45 rg 50.00 717.00 Td (NVIDIA RTX 6000 Ada  ·  2026-05-30  ·  fix commit 5697955ac0  ·  Elements = 2^28) Tj ET
+BT /F2 13 Tf 0.1 0.3 0.55 rg 50.00 693.00 Td (Summary) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 677.00 Td (Benchmarking the new HostJIT \(v2\) backend against the legacy NVRTC/LTO backend \(v1\) surfaced) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 664.00 Td (one severe regression: heavy compute operators ran ~5.6x slower on v2. Root cause was a missing) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 651.00 Td (loop-unroll/SROA step in the HostJIT optimization pipeline that left user-operator local arrays) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 638.00 Td (in local memory. A pipeline fix restores parity with v1 on that kernel and is neutral) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 625.00 Td (elsewhere.) Tj ET
+BT /F2 12 Tf 0.1 0.3 0.55 rg 50.00 602.00 Td (Headline: transform/heavy \(operator with a 64-elem local array\)) Tj ET
+0.45 0.45 0.45 RG 0.6 w 58.00 446.00 m 554.00 446.00 l S
+0.45 0.45 0.45 rg 113.11 446.00 91.85 22.59 re f
+BT /F2 8 Tf 0.15 0.15 0.15 rg 113.11 473.59 Td (16,549 us) Tj ET
+BT /F1 8 Tf 0.15 0.15 0.15 rg 113.11 434.00 Td (v1) Tj ET
+0.8 0.16 0.16 rg 260.07 446.00 91.85 127.12 re f
+BT /F2 8 Tf 0.15 0.15 0.15 rg 260.07 578.12 Td (93,139 us) Tj ET
+BT /F1 8 Tf 0.15 0.15 0.15 rg 260.07 434.00 Td (v2 before) Tj ET
+0.13 0.55 0.13 rg 407.04 446.00 91.85 23.43 re f
+BT /F2 8 Tf 0.15 0.15 0.15 rg 407.04 474.43 Td (17,167 us) Tj ET
+BT /F1 8 Tf 0.15 0.15 0.15 rg 407.04 434.00 Td (v2 after) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 420.00 Td (v1 16,549 us vs v2 before 93,139 us \(0.18x of v1\) vs v2 after 17,167 us \(0.96x\). The fix is a) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 407.00 Td (5.4x speedup on this kernel, restoring v1 parity. Geomean across the full suite improved from) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 394.00 Td (~9% slower than v1 to ~3% slower \(nearly all of the gain from this kernel\); every other kernel) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 381.00 Td (is unchanged within noise.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R /F2 8 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 3571 >>
+stream
+BT /F2 13 Tf 0.1 0.3 0.55 rg 50.00 737.00 Td (Identified problem) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 721.00 Td (cuobjdump showed the heavy kernel used a 256-byte local-memory stack frame with ~670 local) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 708.00 Td (load/store \(LDL/STL\) instructions on v2, vs zero on v1 \(where the operator's uint32[64] array) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 695.00 Td (lives in registers\). The optimized IR confirmed the cause: HostJIT's default O2 pipeline only) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 682.00 Td (PARTIALLY unrolled the operator's fixed-trip-count loops, so the backing alloca kept a dynamic) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 669.00 Td (index and SROA could not promote it. ptxas does this promotion on the v1/LTO path; the) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 656.00 Td (LLVM-NVPTX path needs full-unroll-then-SROA at the IR level.) Tj ET
+BT /F2 13 Tf 0.1 0.3 0.55 rg 50.00 635.00 Td (Resolution) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 619.00 Td (In c/parallel.v2/src/hostjit/compiler.cpp, raise LLVM's loop-unroll thresholds so the) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 606.00 Td (operator's small constant-trip loops fully unroll, then re-run the optimization pipeline so) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 593.00 Td (SROA promotes the now-constant-indexed arrays to registers. \(Also adds a CCCL_HOSTJIT_DUMP_DIR) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 580.00 Td (debug hook for IR/PTX dumps.\)) Tj ET
+BT /F2 12 Tf 0.1 0.3 0.55 rg 50.00 551.00 Td (Remaining v2 gaps \(separate root causes, not this fix\)) Tj ET
+0.85 0.85 0.85 RG 0.4 w 373.45 549.00 m 373.45 441.00 l S
+BT /F1 7 Tf 0.45 0.45 0.45 rg 367.45 553.00 Td (0.5) Tj ET
+0.45 0.45 0.45 RG 0.4 w 523.91 549.00 m 523.91 441.00 l S
+BT /F1 7 Tf 0.45 0.45 0.45 rg 517.91 553.00 Td (1.0) Tj ET
+BT /F1 7 Tf 0.45 0.45 0.45 rg 219.00 553.00 Td (v2/v1) Tj ET
+0.8 0.16 0.16 rg 223.00 523.00 167.21 11.00 re f
+BT /F1 8 Tf 0.15 0.15 0.15 rg 58.00 525.00 Td (segmented_reduce/variable_sum [var) Tj ET
+BT /F1 7 Tf 0.15 0.15 0.15 rg 393.21 525.00 Td (0.56x) Tj ET
+0.8 0.16 0.16 rg 223.00 503.00 274.85 11.00 re f
+BT /F1 8 Tf 0.15 0.15 0.15 rg 58.00 505.00 Td (segmented_sort/keys [small]) Tj ET
+BT /F1 7 Tf 0.15 0.15 0.15 rg 500.85 505.00 Td (0.91x) Tj ET
+0.8 0.16 0.16 rg 223.00 483.00 281.11 11.00 re f
+BT /F1 8 Tf 0.15 0.15 0.15 rg 58.00 485.00 Td (transform/complex_cmp [compare_com) Tj ET
+BT /F1 7 Tf 0.15 0.15 0.15 rg 507.11 485.00 Td (0.93x) Tj ET
+0.8 0.16 0.16 rg 223.00 463.00 284.00 11.00 re f
+BT /F1 8 Tf 0.15 0.15 0.15 rg 58.00 465.00 Td (reduce/custom) Tj ET
+BT /F1 7 Tf 0.15 0.15 0.15 rg 510.00 465.00 Td (0.94x) Tj ET
+0.85 0.55 0.1 rg 223.00 443.00 290.11 11.00 re f
+BT /F1 8 Tf 0.15 0.15 0.15 rg 58.00 445.00 Td (segmented_sort/keys [power]) Tj ET
+BT /F1 7 Tf 0.15 0.15 0.15 rg 516.11 445.00 Td (0.96x) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 415.00 Td (These were unchanged by the fix. segmented_reduce/variable_sum \(~1.8x slower\) is the largest) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 402.00 Td (and is likely the v2 segmented-reduce dispatch/signature path, not codegen. segmented_sort/keys) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 389.00 Td ([power] slipped ~4% AFTER the fix because the unroll threshold is currently a process-wide) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 376.00 Td (setting - an argument for refining to a scoped, single appended SROA pass \(which also halves) Tj ET
+BT /F1 9.5 Tf 0.15 0.15 0.15 rg 50.00 363.00 Td (the JIT compile cost\).) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+8 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000257 00000 n 
+0000002517 00000 n 
+0000002653 00000 n 
+0000006276 00000 n 
+0000006346 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+6421
+%%EOF

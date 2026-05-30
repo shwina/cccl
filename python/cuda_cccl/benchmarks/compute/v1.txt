@@ -1,0 +1,99 @@
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(349): warning #1444-D: class "long4" was declared deprecated ("use long4_16a or long4_32a")
+  __CUB_ALIGN_BYTES(long4, 16)
+  ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(350): warning #1444-D: class "ulong4" was declared deprecated ("use ulong4_16a or ulong4_32a")
+  __CUB_ALIGN_BYTES(ulong4, 16)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(362): warning #1444-D: class "longlong4" was declared deprecated ("use longlong4_16a or longlong4_32a")
+  __CUB_ALIGN_BYTES(longlong4, 16)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(363): warning #1444-D: class "ulonglong4" was declared deprecated ("use ulonglong4_16a or ulonglong4_32a")
+  __CUB_ALIGN_BYTES(ulonglong4, 16)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(364): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+  __CUB_ALIGN_BYTES(double4, 16)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(648): warning #1444-D: class "long4" was declared deprecated ("use long4_16a or long4_32a")
+  CUB_DEFINE_VECTOR_TYPE(long,               long)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(649): warning #1444-D: class "longlong4" was declared deprecated ("use longlong4_16a or longlong4_32a")
+  CUB_DEFINE_VECTOR_TYPE(long long,          longlong)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(655): warning #1444-D: class "ulong4" was declared deprecated ("use ulong4_16a or ulong4_32a")
+  CUB_DEFINE_VECTOR_TYPE(unsigned long,      ulong)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(656): warning #1444-D: class "ulonglong4" was declared deprecated ("use ulonglong4_16a or ulonglong4_32a")
+  CUB_DEFINE_VECTOR_TYPE(unsigned long long, ulonglong)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cub/util_type.cuh(660): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+  CUB_DEFINE_VECTOR_TYPE(double,             double)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/nvidia/cu13/include/cuda_fp8.hpp(1499): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+      explicit __CUDA_HOSTDEVICE_FP8__ __nv_fp8x4_e5m2(const double4 f) {
+                                       ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/nvidia/cu13/include/cuda_fp8.hpp(2128): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+      explicit __CUDA_HOSTDEVICE_FP8__ __nv_fp8x4_e4m3(const double4 f) {
+                                       ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/nvidia/cu13/include/cuda_fp8.hpp(2777): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+      explicit __CUDA_HOSTDEVICE_FP8__ __nv_fp8x4_e8m0(const double4 f) {
+                                       ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/nvidia/cu13/include/cuda_fp6.hpp(1033): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+      explicit __CUDA_HOSTDEVICE_FP6__ __nv_fp6x4_e3m2(const double4 f) {
+                                       ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/nvidia/cu13/include/cuda_fp6.hpp(1615): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+      explicit __CUDA_HOSTDEVICE_FP6__ __nv_fp6x4_e2m3(const double4 f) {
+                                       ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/nvidia/cu13/include/cuda_fp4.hpp(974): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+      explicit __CUDA_HOSTDEVICE_FP4__ __nv_fp4x4_e2m1(const double4 f) {
+                                       ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cuda/std/__tuple_dir/vector_types.h(265): warning #1444-D: class "long4" was declared deprecated ("use long4_16a or long4_32a")
+  _LIBCUDACXX_SPECIALIZE_GET_VECTOR(long, long)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cuda/std/__tuple_dir/vector_types.h(266): warning #1444-D: class "ulong4" was declared deprecated ("use ulong4_16a or ulong4_32a")
+  _LIBCUDACXX_SPECIALIZE_GET_VECTOR(ulong, unsigned long)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cuda/std/__tuple_dir/vector_types.h(267): warning #1444-D: class "longlong4" was declared deprecated ("use longlong4_16a or longlong4_32a")
+  _LIBCUDACXX_SPECIALIZE_GET_VECTOR(longlong, long long)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cuda/std/__tuple_dir/vector_types.h(268): warning #1444-D: class "ulonglong4" was declared deprecated ("use ulonglong4_16a or ulonglong4_32a")
+  _LIBCUDACXX_SPECIALIZE_GET_VECTOR(ulonglong, unsigned long long)
+  ^
+
+/tmp/cccl-bench/v1/lib/python3.13/site-packages/cuda/cccl/headers/include/cuda/std/__tuple_dir/vector_types.h(282): warning #1444-D: class "double4" was declared deprecated ("use double4_16a or double4_32a")
+  _LIBCUDACXX_SPECIALIZE_GET_VECTOR(double, double)
+  ^
+
+
+backend: v1 (USING_V2=False)
+config:  heaviness=64  elements=65536
+cubin:   191984 bytes -> heavy_v1.cubin
+time:    6.12 us/iter (mean of 200)
+
+=== cuobjdump -res-usage ===
+
+Resource usage:
+ Common:
+  GLOBAL:2367 CONSTANT[4]:8728
+ Function _ZN3cub16_V_300500_SM_8906detail9transform16transform_kernelINS2_26policy_selector_from_typesILb0ELb1EN4cuda3std3__45tupleIJPjEEES9_EElNS5_3__411always_trueE24stateless_user_operationI29unary_transform_operation_tagXtl17cccl_op_t_mappingIXadL_Z22wrapped__heavy_op_64_0EEELb1ELi0ELi1EEEXtl22cccl_type_info_mappingIjEEEJXtlSJ_EEEES9_JS9_EEEvT0_ibT1_T2_T3_DpNS2_10kernel_argIT4_EE:
+  REG:80 STACK:0 SHARED:0 LOCAL:0 CONSTANT[0]:392 TEXTURE:0 SURFACE:0 SAMPLER:0

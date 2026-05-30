@@ -1,0 +1,16 @@
+warning: Linking two modules of different data layouts: '/tmp/cccl_op_0_140735699982480.bc' is '' whereas '/tmp/hostjit_767338160/input.cu' is 'e-p6:32:32-i64:64-i128:128-i256:256-v16:16-v32:32-n16:32:64'
+
+backend: v2 (USING_V2=True)
+config:  heaviness=64  elements=65536
+cubin:   45920 bytes -> heavy_v2.cubin
+time:    24.34 us/iter (mean of 200)
+
+=== cuobjdump -res-usage ===
+
+Resource usage:
+ Common:
+  GLOBAL:8
+ Function _ZN3cub31_V_300500_SM___CUDA_ARCH_LIST__6detail9transform16transform_kernelINS2_26policy_selector_from_typesILb0ELb1EN4cuda3std3__45tupleIJPjEEES9_EElNS5_3__411always_trueE9UnaryOp_0S9_JS9_EEEvT0_ibT1_T2_T3_DpNS2_10kernel_argIT4_EE:
+  REG:95 STACK:256 SHARED:0 LOCAL:0 CONSTANT[0]:392 TEXTURE:0 SURFACE:0 SAMPLER:0
+ Function _ZN3cub31_V_300500_SM___CUDA_ARCH_LIST__6detail11EmptyKernelIvEEvv:
+  REG:4 STACK:0 SHARED:0 LOCAL:0 CONSTANT[0]:352 TEXTURE:0 SURFACE:0 SAMPLER:0
